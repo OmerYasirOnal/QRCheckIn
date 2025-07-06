@@ -42,7 +42,7 @@
             
             <div class="info-card">
                 <h3>💡 Bilgi</h3>
-                <p>Yeni bir ders oluşturduğunuzda, öğrencilerinizin yoklama yapması için QR kod üretilir.</p>
+                <p>Yeni ders oluşturduğunuzda öğrenciler için QR kod üretilir.</p>
             </div>
             
             <form id="lessonForm">
@@ -55,15 +55,15 @@
                 <div class="form-group">
                     <label for="lessonDate">Ders Tarihi</label>
                     <input type="date" id="lessonDate" name="lessonDate" required readonly>
-                    <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
-                        Ders tarihi otomatik olarak bugünün tarihi olarak ayarlanır.
+                    <small style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
+                        Otomatik olarak bugünün tarihi ayarlanır.
                     </small>
                 </div>
 
                 <!-- Konum Kısıtlaması Bölümü -->
                 <div class="info-card warning" style="margin: var(--space-4) 0;">
-                    <h3>📍 Konum Kısıtlaması (İsteğe Bağlı)</h3>
-                    <p>Öğrencilerin sadece belirli bir konumdan yoklama yapabilmesini sağlar.</p>
+                    <h3>📍 Konum Kısıtlaması</h3>
+                    <p>Öğrencilerin sadece belirli bir konumdan yoklama yapmasını sağlar.</p>
                 </div>
 
                 <div class="form-group">
@@ -73,7 +73,7 @@
                         📍 Konum kısıtlaması etkinleştir
                     </label>
                     <small style="color: var(--gray-600); margin-top: var(--space-1); display: block;">
-                        Etkinleştirildiğinde öğrenciler sadece belirlenen alan içinden yoklama yapabilir.
+                        Etkinleştirildiğinde öğrenciler sadece belirlenen alanda yoklama yapabilir.
                     </small>
                 </div>
 
@@ -100,7 +100,7 @@
                             📍 Mevcut Konumu Al
                         </button>
                         <small style="color: var(--gray-600); margin-top: var(--space-1); display: block;">
-                            Şu anki konumunuzu ders merkezi olarak ayarlar.
+                            Şu anki konumunuzu ders konumu olarak ayarlar.
                         </small>
                     </div>
 

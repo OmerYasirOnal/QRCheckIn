@@ -39,15 +39,15 @@
             <div id="qrcode"></div>
             <div id="qrMessage">
                 <p style="margin-top: var(--space-4); color: var(--gray-600);">
-                    QR kodu telefonunuzla okutarak yoklama sayfasına erişebilirsiniz.
+                    QR kodu telefonla okutarak yoklama yapın.
                 </p>
             </div>
             
             <div class="info-card">
                 <h3>💡 Nasıl Kullanılır?</h3>
-                <p><strong>1.</strong> Öğrenciler QR kodu telefonlarındaki kamera uygulaması ile okutacaklar</p>
-                <p><strong>2.</strong> Otomatik olarak yoklama sayfasına yönlendirilecekler</p>
-                <p><strong>3.</strong> Ad ve soyadlarını girerek yoklama yapacaklar</p>
+                <p><strong>1.</strong> Öğrenciler QR kodu telefonla okutacak</p>
+                <p><strong>2.</strong> Yoklama sayfasına yönlendirilecek</p>
+                <p><strong>3.</strong> Ad ve soyadlarını girerek yoklama yapacak</p>
                 <p><strong>4.</strong> Her cihazdan sadece bir kez yoklama yapılabilir</p>
             </div>
         </div>
@@ -68,7 +68,6 @@
                 <h2>👥 Anlık Yoklama Listesi</h2>
                 <div style="display: flex; gap: var(--space-2);">
                     <button class="btn btn-sm btn-outline" onclick="refreshAttendance()">🔄 Yenile</button>
-                    <button class="btn btn-sm" onclick="generateNewQR()">🔄 Yeni QR Kod</button>
                     <button class="btn btn-sm btn-danger" onclick="invalidateQR()" id="invalidateBtn">❌ QR Geçersiz Kıl</button>
                 </div>
             </div>
@@ -340,9 +339,8 @@
                 qrMessage.innerHTML = `
                     <div class="info-card warning" style="margin-top: var(--space-4);">
                         <h3>⚠️ Dikkat</h3>
-                        <p><strong>Bu QR kod geçersiz kılınmıştır.</strong></p>
-                        <p>Mevcut yoklama listesi korunur ancak yeni öğrenciler yoklama yapamaz.</p>
-                        <p>Yeni yoklama için yeni bir ders oluşturmanız gerekir.</p>
+                        <p>Bu QR kod geçersiz kılınmıştır. Yeni öğrenciler yoklama yapamaz.</p>
+                        <p>Yeni yoklama için yeni bir ders oluşturun.</p>
                     </div>
                 `;
                 
@@ -364,22 +362,7 @@
             }
         }
 
-        // Yeni QR kod oluştur
-        async function generateNewQR() {
-            if (!confirm('Yeni QR kod oluşturmak istediğinizden emin misiniz?\n\nBu işlem mevcut QR kodu geçersiz kılacaktır.')) {
-                return;
-            }
-            
-            try {
-                showMessage('🔄 Yeni QR kod oluşturuluyor...', 'info');
-                
-                // Sayfayı yeniden yükleyerek yeni QR kod oluştur
-                window.location.reload();
-                
-            } catch (error) {
-                showMessage('⚠️ Yeni QR kod oluşturulurken hata oluştu: ' + error.message, 'error');
-            }
-        }
+
         
         function refreshAttendance() {
             loadAttendanceList();

@@ -34,23 +34,7 @@
         
         <div class="info-card">
             <h3>🎉 Tebrikler!</h3>
-            <p><strong>Yoklamanız başarıyla kaydedildi.</strong> Bu cihazdan bu derse tekrar yoklama yapamazsınız.</p>
-            <p>Yoklama sistemi kullandığınız için teşekkür ederiz.</p>
-        </div>
-        
-        <div class="info-card warning">
-            <h3>⚠️ Önemli Bilgi</h3>
-            <p><strong>Tekrar Yoklama:</strong> Bu cihazdan aynı derse tekrar yoklama yapamazsınız.</p>
-            <p><strong>Başka Cihaz:</strong> Gerekirse başka bir cihaz kullanarak yoklama yapabilirsiniz.</p>
-        </div>
-        
-        <div style="display: flex; gap: var(--space-4); margin-top: var(--space-8); flex-wrap: wrap;">
-            <button class="btn btn-secondary btn-full" onclick="window.close()" style="flex: 1;">
-                🔒 Pencereyi Kapat
-            </button>
-            <button class="btn btn-outline btn-full" onclick="printAttendance()" style="flex: 1;">
-                🖨️ Yazdır
-            </button>
+            <p>Yoklamanız başarıyla kaydedildi. Yoklama sistemi kullandığınız için teşekkür ederiz.</p>
         </div>
         
         <!-- Konfeti container -->
@@ -85,11 +69,6 @@
             
             // Konfeti efekti
             setTimeout(showConfetti, 800);
-            
-            // 5 saniye sonra otomatik olarak pencereyi kapatma seçeneği
-            setTimeout(() => {
-                showAutoCloseOption();
-            }, 5000);
         };
         
         async function loadLessonInfo(lessonId) {
@@ -117,8 +96,8 @@
             const container = document.getElementById('confetti-container');
             const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
             
-            // 50 konfeti parçası oluştur
-            for (let i = 0; i < 50; i++) {
+            // 30 konfeti parçası oluştur
+            for (let i = 0; i < 30; i++) {
                 setTimeout(() => {
                     createConfettiPiece(container, colors);
                 }, i * 50);
@@ -154,72 +133,6 @@
             }, animationDuration * 1000);
         }
         
-        function showAutoCloseOption() {
-            // Sayfanın alt kısmına otomatik kapanma bildirimi ekle
-            const notification = document.createElement('div');
-            notification.className = 'info-card';
-            notification.style.cssText = `
-                position: fixed;
-                bottom: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                max-width: 400px;
-                animation: slideUp 0.3s ease-out;
-                z-index: 1001;
-            `;
-            notification.innerHTML = `
-                <h3>💡 İpucu</h3>
-                <p>Bu pencereyi kapatmak için üstteki "Pencereyi Kapat" butonunu kullanabilirsiniz.</p>
-            `;
-            
-            document.body.appendChild(notification);
-            
-            // 8 saniye sonra bildirimi kaldır
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.style.animation = 'slideDown 0.3s ease-out forwards';
-                    setTimeout(() => {
-                        notification.parentNode.removeChild(notification);
-                    }, 300);
-                }
-            }, 8000);
-        }
-        
-        function printAttendance() {
-            // Print sayfası için stilleri ayarla
-            const printStyle = document.createElement('style');
-            printStyle.textContent = `
-                @media print {
-                    body * {
-                        visibility: hidden;
-                    }
-                    .container, .container * {
-                        visibility: visible;
-                    }
-                    .container {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
-                        width: 100%;
-                    }
-                    button {
-                        display: none !important;
-                    }
-                    #confetti-container {
-                        display: none !important;
-                    }
-                }
-            `;
-            document.head.appendChild(printStyle);
-            
-            window.print();
-            
-            // Print işlemi bittikten sonra stili kaldır
-            setTimeout(() => {
-                document.head.removeChild(printStyle);
-            }, 1000);
-        }
-        
         // CSS animasyonları dinamik olarak ekle
         const style = document.createElement('style');
         style.textContent = `
@@ -230,28 +143,6 @@
                 }
                 100% {
                     transform: translateY(100vh) rotate(360deg);
-                    opacity: 0;
-                }
-            }
-            
-            @keyframes slideUp {
-                0% {
-                    transform: translateX(-50%) translateY(100%);
-                    opacity: 0;
-                }
-                100% {
-                    transform: translateX(-50%) translateY(0);
-                    opacity: 1;
-                }
-            }
-            
-            @keyframes slideDown {
-                0% {
-                    transform: translateX(-50%) translateY(0);
-                    opacity: 1;
-                }
-                100% {
-                    transform: translateX(-50%) translateY(100%);
                     opacity: 0;
                 }
             }
@@ -270,25 +161,6 @@
             }
         `;
         document.head.appendChild(style);
-        
-        // Klavye kısayolları
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' || e.key === 'Enter') {
-                window.close();
-            } else if (e.ctrlKey && e.key === 'p') {
-                e.preventDefault();
-                printAttendance();
-            }
-        });
-        
-        // Sayfaya tıklandığında konfeti efekti (opsiyonel)
-        let clickCount = 0;
-        document.addEventListener('click', function(e) {
-            clickCount++;
-            if (clickCount <= 3) { // İlk 3 tıklamada konfeti göster
-                showConfetti();
-            }
-        });
     </script>
 </body>
 </html> 

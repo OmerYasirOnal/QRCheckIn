@@ -11,10 +11,92 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
+// Input validation and sanitization constants
+const INPUT_LIMITS = {
+    name: { min: 2, max: 100 },
+    email: { min: 5, max: 100 },
+    password: { min: 6, max: 100 },
+    lessonName: { min: 2, max: 200 },
+    studentName: { min: 1, max: 100 },
+    locationName: { min: 1, max: 200 }
+};
+
+// Security utility functions
+function sanitizeInput(input, type = 'text') {
+    if (typeof input !== 'string') return '';
+    
+    // Remove potentially dangerous characters
+    let sanitized = input
+        .replace(/[<>\"']/g, '') // Remove XSS characters
+        .replace(/[;&|`$()]/g, '') // Remove command injection characters
+        .trim();
+    
+    if (type === 'name') {
+        // Allow only letters, numbers, spaces, and basic punctuation for names
+        sanitized = sanitized.replace(/[^a-zA-Z0-9\s\-_.,şŞçÇğĞüÜöÖıİ]/g, '');
+    } else if (type === 'email') {
+        // Allow only valid email characters
+        sanitized = sanitized.replace(/[^a-zA-Z0-9@._-]/g, '');
+    }
+    
+    return sanitized;
+}
+
+function validateInputLength(input, field) {
+    if (!INPUT_LIMITS[field]) return true;
+    const length = input ? input.length : 0;
+    return length >= INPUT_LIMITS[field].min && length <= INPUT_LIMITS[field].max;
+}
+
+function isValidEmail(email) {
+    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    return emailRegex.test(email);
+}
+
+// Enhanced security check function
+function validateAndSanitizeInput(req, res, requiredFields) {
+    const sanitized = {};
+    
+    for (const field of requiredFields) {
+        const value = req.body[field];
+        
+        if (!value) {
+            return { 
+                error: true, 
+                message: `${field} gereklidir.`,
+                status: 400 
+            };
+        }
+        
+        const sanitizedValue = sanitizeInput(value, field);
+        
+        if (!validateInputLength(sanitizedValue, field)) {
+            const limits = INPUT_LIMITS[field];
+            return { 
+                error: true, 
+                message: `${field} ${limits.min} ile ${limits.max} karakter arasında olmalıdır.`,
+                status: 400 
+            };
+        }
+        
+        if (field === 'email' && !isValidEmail(sanitizedValue)) {
+            return { 
+                error: true, 
+                message: 'Geçerli bir e-posta adresi girin.',
+                status: 400 
+            };
+        }
+        
+        sanitized[field] = sanitizedValue;
+    }
+    
+    return { error: false, data: sanitized };
+}
+
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '1mb' })); // Limit JSON payload size
+app.use(bodyParser.urlencoded({ extended: true, limit: '1mb' }));
 app.use(express.static('public'));
 
 // SQLite veritabanı bağlantısı
@@ -144,20 +226,26 @@ function initDatabase() {
     console.log('Veritabanı tabloları oluşturuldu.');
 }
 
-// Authentication Middleware
+// Enhanced JWT token doğrulama middleware
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-
+    
     if (!token) {
         return res.status(401).json({ 
             success: false, 
-            message: 'Giriş yapmanız gerekiyor.' 
+            message: 'Erişim reddedildi. Token gereklidir.' 
         });
     }
-
+    
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) {
+            if (err.name === 'TokenExpiredError') {
+                return res.status(401).json({ 
+                    success: false, 
+                    message: 'Token süresi dolmuş. Lütfen tekrar giriş yapın.' 
+                });
+            }
             return res.status(403).json({ 
                 success: false, 
                 message: 'Geçersiz token.' 
@@ -206,33 +294,43 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return distance;
 }
 
-// Konum doğrulaması
+// Gelişmiş konum doğrulama fonksiyonu
 function validateLocation(studentLat, studentLon, centerLat, centerLon, radiusMeters, accuracy) {
-    // Konum bilgileri eksikse
-    if (!studentLat || !studentLon || !centerLat || !centerLon) {
-        return { valid: false, reason: 'Konum bilgileri eksik.' };
-    }
-
-    // GPS doğruluğu çok düşükse (100 metre'den fazla hata payı)
-    if (accuracy && accuracy > 100) {
-        return { valid: false, reason: 'GPS sinyali yeterince güçlü değil. Lütfen açık alanda tekrar deneyin.' };
-    }
-
-    // Mesafeyi hesapla
-    const distance = calculateDistance(studentLat, studentLon, centerLat, centerLon);
-    
-    // İzin verilen yarıçapın dışındaysa
-    if (distance > radiusMeters) {
-        return { 
-            valid: false, 
-            reason: `Ders konumundan ${Math.round(distance)} metre uzaktasınız. İzin verilen mesafe: ${radiusMeters} metre.`,
-            distance: Math.round(distance)
+    // GPS doğruluğu kontrolü - 100m ve üzeri kabul edilmez
+    if (accuracy >= 100) {
+        return {
+            valid: false,
+            message: 'GPS sinyali yeterince güçlü değil. Açık bir alanda olduğunuzdan emin olun ve tekrar deneyin.',
+            reason: 'weak_gps'
         };
     }
-
-    return { 
-        valid: true, 
-        distance: Math.round(distance) 
+    
+    // Koordinat eksikliği kontrolü
+    if (!studentLat || !studentLon || !centerLat || !centerLon) {
+        return {
+            valid: false,
+            message: 'Konum bilgileri eksik. Lütfen konumunuzu paylaşın.',
+            reason: 'missing_location'
+        };
+    }
+    
+    // Mesafe hesaplama
+    const distance = calculateDistance(studentLat, studentLon, centerLat, centerLon);
+    
+    if (distance > radiusMeters) {
+        return {
+            valid: false,
+            message: `Ders konumundan ${Math.round(distance)} metre uzaktasınız. Lütfen ders konumuna yaklaşın.`,
+            reason: 'outside_range',
+            distance: distance
+        };
+    }
+    
+    return {
+        valid: true,
+        message: 'Konum doğrulandı.',
+        reason: 'success',
+        distance: distance
     };
 }
 
@@ -271,32 +369,18 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Öğretmen kayıt endpoint'i
+// Enhanced öğretmen kayıt endpoint'i
 app.post('/register', async (req, res) => {
-    const { name, email, password } = req.body;
+    // Input validation and sanitization
+    const validation = validateAndSanitizeInput(req, res, ['name', 'email', 'password']);
+    if (validation.error) {
+        return res.status(validation.status).json({ 
+            success: false, 
+            message: validation.message 
+        });
+    }
     
-    if (!name || !email || !password) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Ad, e-posta ve şifre gereklidir.' 
-        });
-    }
-
-    if (password.length < 6) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Şifre en az 6 karakter olmalıdır.' 
-        });
-    }
-
-    // E-posta kontrolü
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Geçerli bir e-posta adresi girin.' 
-        });
-    }
+    const { name, email, password } = validation.data;
 
     // Mevcut kullanıcı kontrolü
     db.get('SELECT * FROM teachers WHERE email = ?', [email], (err, row) => {
@@ -348,16 +432,17 @@ app.post('/register', async (req, res) => {
     });
 });
 
-// Öğretmen giriş endpoint'i
+// Enhanced öğretmen giriş endpoint'i
 app.post('/login', (req, res) => {
-    const { email, password } = req.body;
-    
-    if (!email || !password) {
-        return res.status(400).json({ 
+    const validation = validateAndSanitizeInput(req, res, ['email', 'password']);
+    if (validation.error) {
+        return res.status(validation.status).json({ 
             success: false, 
-            message: 'E-posta ve şifre gereklidir.' 
+            message: validation.message 
         });
     }
+    
+    const { email, password } = validation.data;
 
     db.get('SELECT * FROM teachers WHERE email = ?', [email], (err, row) => {
         if (err) {
@@ -399,7 +484,7 @@ app.post('/login', (req, res) => {
     });
 });
 
-// Ders oluşturma endpoint'i (Authentication required)
+// Enhanced ders oluşturma endpoint'i (Authentication required)
 app.post('/createLesson', authenticateToken, (req, res) => {
     const { 
         name, 
@@ -411,7 +496,18 @@ app.post('/createLesson', authenticateToken, (req, res) => {
         locationName 
     } = req.body;
     
-    if (!name || !date) {
+    // Input validation
+    const sanitizedName = sanitizeInput(name, 'name');
+    const sanitizedLocationName = locationName ? sanitizeInput(locationName, 'name') : null;
+    
+    if (!validateInputLength(sanitizedName, 'lessonName')) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Ders adı 2 ile 200 karakter arasında olmalıdır.' 
+        });
+    }
+    
+    if (!sanitizedName || !date) {
         return res.status(400).json({ 
             success: false, 
             message: 'Ders adı ve tarih gereklidir.' 
@@ -448,14 +544,14 @@ app.post('/createLesson', authenticateToken, (req, res) => {
     const values = [
         lessonId, 
         req.user.id, 
-        name, 
+        sanitizedName, 
         date, 
         30,
         locationEnabled ? 1 : 0,
         locationEnabled ? centerLatitude : null,
         locationEnabled ? centerLongitude : null,
         locationEnabled ? radiusMeters : null,
-        locationEnabled ? locationName : null
+        locationEnabled ? sanitizedLocationName : null
     ];
     
     db.run(query, values, function(err) {
@@ -497,52 +593,67 @@ app.get('/myLessons', authenticateToken, (req, res) => {
     );
 });
 
-// Ders silme endpoint'i (Authentication required)
+// NEW: Enhanced ders silme endpoint'i (Authentication required)
 app.delete('/deleteLesson/:lessonId', authenticateToken, (req, res) => {
     const lessonId = req.params.lessonId;
+    
+    if (!lessonId) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Ders ID gereklidir.' 
+        });
+    }
     
     // Önce dersin bu öğretmene ait olup olmadığını kontrol et
     db.get('SELECT * FROM lessons WHERE id = ? AND teacher_id = ?', 
         [lessonId, req.user.id], 
-        (err, row) => {
+        (err, lesson) => {
             if (err) {
                 console.error('Ders kontrol hatası:', err.message);
                 return res.status(500).json({ 
                     success: false, 
-                    message: 'Ders kontrolü yapılamadı.' 
+                    message: 'Ders kontrol hatası.' 
                 });
             }
             
-            if (!row) {
+            if (!lesson) {
                 return res.status(404).json({ 
                     success: false, 
                     message: 'Ders bulunamadı veya yetkiniz yok.' 
                 });
             }
             
-            // Önce yoklama kayıtlarını sil
+            // Önce ilgili yoklama kayıtlarını sil
             db.run('DELETE FROM attendances WHERE lesson_id = ?', [lessonId], (err) => {
                 if (err) {
                     console.error('Yoklama kayıtları silme hatası:', err.message);
                     return res.status(500).json({ 
                         success: false, 
-                        message: 'Ders silinemedi.' 
+                        message: 'Yoklama kayıtları silinemedi.' 
                     });
                 }
                 
-                // Sonra dersi sil
-                db.run('DELETE FROM lessons WHERE id = ?', [lessonId], (err) => {
+                // Konum doğrulama loglarını sil
+                db.run('DELETE FROM location_validation_logs WHERE lesson_id = ?', [lessonId], (err) => {
                     if (err) {
-                        console.error('Ders silme hatası:', err.message);
-                        return res.status(500).json({ 
-                            success: false, 
-                            message: 'Ders silinemedi.' 
-                        });
+                        console.error('Konum logları silme hatası:', err.message);
+                        // Kritik değil, devam et
                     }
                     
-                    res.json({ 
-                        success: true, 
-                        message: 'Ders başarıyla silindi.' 
+                    // Dersi sil
+                    db.run('DELETE FROM lessons WHERE id = ?', [lessonId], function(err) {
+                        if (err) {
+                            console.error('Ders silme hatası:', err.message);
+                            return res.status(500).json({ 
+                                success: false, 
+                                message: 'Ders silinemedi.' 
+                            });
+                        }
+                        
+                        res.json({ 
+                            success: true, 
+                            message: 'Ders ve tüm ilgili kayıtlar başarıyla silindi.' 
+                        });
                     });
                 });
             });
@@ -629,7 +740,7 @@ app.get('/lesson/:lessonId', (req, res) => {
     );
 });
 
-// Yoklama alma endpoint'i (Public - Öğrenciler için)
+// Enhanced yoklama alma endpoint'i (Public - Öğrenciler için)
 app.post('/takeAttendance', (req, res) => {
     const { 
         lessonId, 
@@ -640,10 +751,19 @@ app.post('/takeAttendance', (req, res) => {
     } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || '127.0.0.1';
     
+    // Input validation and sanitization
     if (!lessonId || !studentName) {
         return res.status(400).json({ 
             success: false, 
-            message: 'Ders ID ve öğrenci adı gereklidir.' 
+            message: 'Lütfen adınızı ve soyadınızı tam olarak giriniz.' 
+        });
+    }
+    
+    const sanitizedStudentName = sanitizeInput(studentName, 'name');
+    if (!validateInputLength(sanitizedStudentName, 'studentName')) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Öğrenci adı 1 ile 100 karakter arasında olmalıdır.' 
         });
     }
 
@@ -660,7 +780,7 @@ app.post('/takeAttendance', (req, res) => {
         if (!lesson) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'Ders bulunamadı.' 
+                message: 'Ders bulunamadı. Lütfen QR kodu tekrar okutun.' 
             });
         }
 
@@ -668,84 +788,48 @@ app.post('/takeAttendance', (req, res) => {
         if (lesson.is_invalidated) {
             return res.status(410).json({ 
                 success: false, 
-                message: 'Bu QR kod geçersiz kılınmıştır. Artık yoklama yapılamaz.' 
+                message: 'Bu QR kod artık geçerli değil. Öğretmeninizle iletişime geçin.' 
             });
         }
 
-        // Konum kontrolü (eğer aktifse)
+        // Konum kontrolü (eğer etkinse)
         if (lesson.location_enabled) {
-            if (!latitude || !longitude) {
-                // Konum bilgisi eksik - logla
-                logLocationValidation(
-                    lessonId, 
-                    studentName, 
-                    clientIP, 
-                    null, 
-                    null, 
-                    null, 
-                    null, 
-                    lesson.radius_meters, 
-                    'missing_location', 
-                    'Konum bilgisi sağlanmadı'
-                );
-                
-                return res.status(400).json({ 
-                    success: false, 
-                    message: 'Bu ders için konum bilgisi gereklidir. Lütfen konum erişimine izin verin.' 
-                });
-            }
-
-            const locationCheck = validateLocation(
+            const locationValidation = validateLocation(
                 latitude, 
                 longitude, 
                 lesson.center_latitude, 
                 lesson.center_longitude, 
-                lesson.radius_meters,
+                lesson.radius_meters, 
                 accuracy
             );
-
-            if (!locationCheck.valid) {
-                // Konum doğrulama başarısız - logla
-                let logResult = 'location_outside_range';
-                if (accuracy && accuracy > 100) {
-                    logResult = 'weak_gps';
+            
+            // Konum doğrulama logunu kaydet
+            logLocationValidation(
+                lessonId,
+                sanitizedStudentName,
+                clientIP,
+                latitude,
+                longitude,
+                accuracy,
+                locationValidation.distance,
+                lesson.radius_meters,
+                locationValidation.reason,
+                locationValidation.message
+            );
+            
+            if (!locationValidation.valid) {
+                let statusCode = 403;
+                if (locationValidation.reason === 'missing_location') {
+                    statusCode = 400;
                 }
                 
-                logLocationValidation(
-                    lessonId, 
-                    studentName, 
-                    clientIP, 
-                    latitude, 
-                    longitude, 
-                    accuracy, 
-                    locationCheck.distance, 
-                    lesson.radius_meters, 
-                    logResult, 
-                    locationCheck.reason
-                );
-                
-                return res.status(403).json({ 
+                return res.status(statusCode).json({ 
                     success: false, 
-                    message: locationCheck.reason,
-                    distance: locationCheck.distance || null,
-                    allowedRadius: lesson.radius_meters,
-                    locationName: lesson.location_name || 'Ders Konumu'
+                    message: locationValidation.message,
+                    locationEnabled: true,
+                    reason: locationValidation.reason
                 });
             }
-            
-            // Konum doğrulama başarılı - logla
-            logLocationValidation(
-                lessonId, 
-                studentName, 
-                clientIP, 
-                latitude, 
-                longitude, 
-                accuracy, 
-                locationCheck.distance, 
-                lesson.radius_meters, 
-                'success', 
-                'Konum doğrulandı'
-            );
         }
 
         // Aynı IP adresinden bu derse daha önce yoklama yapılmış mı kontrol et
@@ -763,7 +847,7 @@ app.post('/takeAttendance', (req, res) => {
                 if (row) {
                     return res.status(409).json({ 
                         success: false, 
-                        message: 'Bu cihazdan zaten yoklama yapıldı!' 
+                        message: 'Bu cihazdan daha önce yoklama yapılmış. Bir cihazdan sadece bir kez yoklama yapılabilir.' 
                     });
                 }
                 
@@ -777,7 +861,7 @@ app.post('/takeAttendance', (req, res) => {
                 
                 const insertValues = [
                     lessonId, 
-                    studentName.trim(), 
+                    sanitizedStudentName, 
                     clientIP,
                     latitude || null,
                     longitude || null,

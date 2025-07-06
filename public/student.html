@@ -18,14 +18,13 @@
         
         <div id="locationWarning" class="info-card warning" style="display: none;">
             <h3>📍 Konum Erişimi Gerekli</h3>
-            <p><strong>Yoklama yapabilmek için konum erişimine izin vermeniz gerekiyor.</strong></p>
-            <p>Lütfen tarayıcınızda kesin konum erişimine izin verin.</p>
+            <p>Bu ders için konumunuzun paylaşılması gerekiyor. Lütfen konum erişimine izin verin.</p>
             
             <div id="locationTips" style="display: none; margin-top: var(--space-3);">
-                <p><strong>Konum erişimi nasıl açılır:</strong></p>
+                <p><strong>Konum erişimi nasıl verilir:</strong></p>
                 <ul style="text-align: left; margin: var(--space-2) 0;">
-                    <li><strong>Chrome/Safari:</strong> Adres çubuğundaki 🔒 simgesine tıklayın → Konum → İzin Ver</li>
-                    <li><strong>Firefox:</strong> Adres çubuğundaki shield simgesine tıklayın → Konum → İzin Ver</li>
+                    <li><strong>Chrome/Safari:</strong> Adres çubuğundaki 🔒 → Konum → İzin Ver</li>
+                    <li><strong>Firefox:</strong> Adres çubuğundaki 🛡️ → Konum → İzin Ver</li>
                     <li><strong>Mobil:</strong> Tarayıcı ayarlarından site izinlerini kontrol edin</li>
                 </ul>
             </div>
@@ -43,10 +42,10 @@
         </div>
         
         <div id="gpsStatus" class="info-card" style="display: none;">
-            <h3>📡 GPS Durum</h3>
+            <h3>📍 Konum Durumu</h3>
             <p id="gpsStatusText">Konum alınıyor...</p>
             <div id="gpsAccuracy" style="margin-top: var(--space-2);"></div>
-            <button id="retryLocationBtn" class="btn" style="display: none; margin-top: var(--space-2);">
+            <button id="retryLocationBtn" class="btn btn-sm" style="display: none; margin-top: var(--space-2);">
                 🔄 Tekrar Dene
             </button>
         </div>
@@ -54,8 +53,7 @@
         <div id="attendanceForm" style="display: none;">
             <div class="info-card success">
                 <h3>👋 Hoş Geldiniz!</h3>
-                <p><strong>Yoklama için adınızı ve soyadınızı tam olarak giriniz.</strong></p>
-                <p><small>Bu cihazdan sadece bir kez yoklama yapabilirsiniz.</small></p>
+                <p>Yoklama için adınızı ve soyadınızı tam olarak giriniz.</p>
             </div>
             
             <form id="studentForm">
@@ -71,21 +69,16 @@
         
         <div id="alreadySubmitted" style="display: none;">
             <div class="info-card warning">
-                <h3>⚠️ Zaten Yoklama Yapıldı</h3>
-                <p>Bu cihazdan bu derse zaten yoklama yapılmış. Tekrar yoklama yapamazsınız.</p>
+                <h3>✅ Yoklama Tamamlandı</h3>
+                <p>Bu cihazdan bu derse daha önce yoklama yapılmış.</p>
             </div>
             
             <div class="empty-state">
-                <div class="error-icon">⚠️</div>
-                <h3>Tekrar Yoklama Yapılamaz</h3>
+                <div class="error-icon">✅</div>
+                <h3>Yoklama Başarılı</h3>
                 <p style="color: var(--gray-600);">
-                    Bir cihazdan aynı derse sadece bir kez yoklama yapılabilir.
+                    Bu ders için yoklamanız zaten kaydedildi.
                 </p>
-            </div>
-            
-            <div class="info-card">
-                <h3>💡 İpucu</h3>
-                <p>Başka bir cihaz kullanarak yoklama yapabilirsiniz.</p>
             </div>
         </div>
         
@@ -114,7 +107,7 @@
             lessonId = urlParams.get('lessonId');
             
             if (!lessonId) {
-                showError('Ders bilgisi bulunamadı! Lütfen QR kodu tekrar okutun.');
+                showError('Ders bulunamadı. Lütfen QR kodu tekrar okutun.');
                 return;
             }
             
@@ -161,7 +154,7 @@
                 }
             } catch (error) {
                 console.error('Ders bilgileri yüklenirken hata:', error);
-                showError('Ders bilgileri yüklenemedi. Lütfen QR kodu tekrar okutun.');
+                showError('Ders bilgileri alınamadı. Lütfen QR kodu tekrar okutun.');
             }
         }
         
@@ -249,7 +242,7 @@
                 
             } catch (error) {
                 if (error.code === error.PERMISSION_DENIED) {
-                    throw new Error('Konum erişimi reddedildi. Bu ders için konum bilgisi gerekli.');
+                    throw new Error('Bu ders için konumunuzun paylaşılması gerekiyor.');
                 }
                 
                 // Diğer hatalar için retry
@@ -305,27 +298,27 @@
             
             switch (status) {
                 case 'improving':
-                    statusEl.textContent = 'GPS sinyali iyileştiriliyor...';
-                    accuracyEl.innerHTML = `<span style="color: var(--warning);">📍 Mevcut doğruluk: ±${Math.round(accuracy)}m</span>`;
+                    statusEl.textContent = 'Konumunuz alınıyor...';
+                    accuracyEl.innerHTML = `<span style="color: var(--warning);">📍 Doğruluk: ±${Math.round(accuracy)}m</span>`;
                     retryBtn.style.display = 'none';
                     break;
                     
                 case 'retrying':
-                    statusEl.textContent = 'Konum alınmaya çalışılıyor...';
+                    statusEl.textContent = 'Konum alınıyor...';
                     accuracyEl.innerHTML = '';
                     retryBtn.style.display = 'none';
                     break;
                     
                 case 'weak':
-                    statusEl.textContent = 'GPS sinyali zayıf ancak kullanılabilir';
-                    accuracyEl.innerHTML = `<span style="color: var(--warning);">⚠️ Doğruluk: ±${Math.round(accuracy)}m (Daha iyi sinyal için açık alana çıkın)</span>`;
+                    statusEl.textContent = 'Konum alındı';
+                    accuracyEl.innerHTML = `<span style="color: var(--warning);">⚠️ Doğruluk: ±${Math.round(accuracy)}m</span>`;
                     retryBtn.style.display = 'inline-block';
                     break;
                     
                 case 'ready':
                     statusEl.textContent = 'Konum hazır ✅';
                     accuracyEl.innerHTML = currentLocation ? 
-                        `<span style="color: var(--success);">📍 Doğruluk: ±${Math.round(currentLocation.accuracy)}m</span>` : '';
+                        `<span style="color: var(--success);">📍 ±${Math.round(currentLocation.accuracy)}m</span>` : '';
                     retryBtn.style.display = 'none';
                     break;
             }

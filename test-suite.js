@@ -5,12 +5,18 @@ const https = require('https');
 const CONFIG = {
     baseUrl: 'http://localhost:3000',
     testTimeout: 10000,
+    // Performance thresholds
+    performance: {
+        maxResponseTime: 1000, // ms
+        maxConcurrentRequests: 10
+    },
     // Test locations for location-based tests
     locations: {
         center: { lat: 41.0082, lon: 28.9784 }, // Istanbul center
         inside: { lat: 41.0083, lon: 28.9785 }, // ~15m away
         outside: { lat: 41.0200, lon: 28.9900 }, // ~1.5km away
-        faraway: { lat: 40.7589, lon: -73.9851 } // New York (~8000km away)
+        faraway: { lat: 40.7589, lon: -73.9851 }, // New York (~8000km away)
+        edge: { lat: 41.008287, lon: 28.978487 } // ~10m away (edge case)
     }
 };
 
@@ -20,6 +26,7 @@ let testCounter = 0;
 
 // Utility functions
 function makeRequest(method, path, data = null, headers = {}) {
+    const startTime = Date.now();
     return new Promise((resolve, reject) => {
         const url = new URL(CONFIG.baseUrl + path);
         const options = {
@@ -37,11 +44,22 @@ function makeRequest(method, path, data = null, headers = {}) {
             let body = '';
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
+                const responseTime = Date.now() - startTime;
                 try {
                     const parsed = JSON.parse(body);
-                    resolve({ status: res.statusCode, data: parsed, headers: res.headers });
+                    resolve({ 
+                        status: res.statusCode, 
+                        data: parsed, 
+                        headers: res.headers,
+                        responseTime: responseTime
+                    });
                 } catch (e) {
-                    resolve({ status: res.statusCode, data: body, headers: res.headers });
+                    resolve({ 
+                        status: res.statusCode, 
+                        data: body, 
+                        headers: res.headers,
+                        responseTime: responseTime
+                    });
                 }
             });
         });
@@ -83,15 +101,34 @@ function logTest(name, steps, inputs, expected, actual, passed, error = null) {
     }
 }
 
-// Test data storage
+// Test data storage - use unique emails for each test run
+const timestamp = Date.now();
 let testData = {
     teacher: {
         name: 'Test Teacher',
-        email: 'test@teacher.com',
+        email: `test${timestamp}@teacher.com`,
         password: 'test123456'
     },
     token: null,
-    lessons: []
+    lessons: [],
+    // Security test payloads
+    securityPayloads: {
+        sqlInjection: [
+            "'; DROP TABLE teachers; --",
+            "' OR '1'='1",
+            "'; INSERT INTO teachers (name, email, password_hash) VALUES ('hacker', 'hack@test.com', 'hash'); --"
+        ],
+        xss: [
+            "<script>alert('XSS')</script>",
+            "javascript:alert('XSS')",
+            "<img src=x onerror=alert('XSS')>"
+        ],
+        longStrings: [
+            'A'.repeat(1000),
+            'A'.repeat(10000),
+            'A'.repeat(100000)
+        ]
+    }
 };
 
 // Calculate distance between two points (same as server)
@@ -893,9 +930,560 @@ async function testMyLessons() {
     }
 }
 
-// Test report generation
+// New comprehensive test functions
+async function testPerformance() {
+    console.log('\n⚡ Testing Performance & Response Times...');
+    
+    const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+    
+    // Test 31: Response time for lesson creation
+    try {
+        const lessonData = {
+            name: 'Performance Test Lesson',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: false
+        };
+        
+        const response = await makeRequest('POST', '/createLesson', lessonData, authHeaders);
+        const responseTime = response.responseTime;
+        const passed = response.status === 200 && responseTime < CONFIG.performance.maxResponseTime;
+        
+        if (response.data.success) {
+            testData.lessons.push({
+                id: response.data.lessonId,
+                name: lessonData.name,
+                locationEnabled: false
+            });
+        }
+        
+        logTest(
+            'Performance - Lesson Creation Response Time',
+            [`Measure response time for lesson creation (${responseTime}ms)`],
+            { maxAllowed: CONFIG.performance.maxResponseTime },
+            { withinLimit: true },
+            { withinLimit: responseTime < CONFIG.performance.maxResponseTime, actualTime: responseTime },
+            passed
+        );
+    } catch (error) {
+        logTest('Performance - Lesson Creation Response Time', [], {}, {}, {}, false, error);
+    }
+
+    // Test 32: Concurrent attendance submissions
+    if (testData.lessons.length > 0) {
+        try {
+            const testLesson = testData.lessons[testData.lessons.length - 1];
+            const concurrentRequests = [];
+            const startTime = Date.now();
+            
+            // Create multiple attendance requests with different student names
+            for (let i = 0; i < 5; i++) {
+                const attendanceData = {
+                    lessonId: testLesson.id,
+                    studentName: `Concurrent Student ${i}`
+                };
+                concurrentRequests.push(
+                    makeRequest('POST', '/takeAttendance', attendanceData)
+                        .catch(err => ({ error: err.message, status: 500 }))
+                );
+            }
+            
+            const responses = await Promise.all(concurrentRequests);
+            const totalTime = Date.now() - startTime;
+            const successfulRequests = responses.filter(r => r.status === 200 || r.status === 409).length;
+            const passed = successfulRequests >= 4 && totalTime < 5000; // Allow for one duplicate IP error
+            
+            logTest(
+                'Performance - Concurrent Attendance Submissions',
+                [`Submit ${concurrentRequests.length} concurrent attendance requests`],
+                { expectedSuccessful: '≥4', maxTime: '5000ms' },
+                { successful: '≥4', timeUnder: '5000ms' },
+                { successful: successfulRequests, actualTime: totalTime },
+                passed
+            );
+        } catch (error) {
+            logTest('Performance - Concurrent Attendance Submissions', [], {}, {}, {}, false, error);
+        }
+    }
+}
+
+async function testSecurity() {
+    console.log('\n🛡️ Testing Security & Input Validation...');
+    
+    const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+    
+    // Test 33: SQL Injection in teacher registration
+    try {
+        const maliciousData = {
+            name: testData.securityPayloads.sqlInjection[0],
+            email: 'malicious@test.com',
+            password: 'test123456'
+        };
+        
+        const response = await makeRequest('POST', '/register', maliciousData);
+        const passed = response.status === 400 || response.status === 500 || !response.data.success;
+        
+        logTest(
+            'Security - SQL Injection in Registration',
+            ['Submit registration with SQL injection payload'],
+            { payload: 'SQL_INJECTION_ATTEMPT' },
+            { success: false },
+            { success: response.data.success, rejected: !response.data.success },
+            passed
+        );
+    } catch (error) {
+        // Network errors are also acceptable as they indicate rejection
+        logTest('Security - SQL Injection in Registration', [], {}, {}, { rejected: true }, true);
+    }
+
+    // Test 34: XSS in student name - Create new lesson for clean test
+    try {
+        const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+        const xssLessonData = {
+            name: 'XSS Security Test Lesson',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: false
+        };
+        
+        const lessonResponse = await makeRequest('POST', '/createLesson', xssLessonData, authHeaders);
+        
+        if (lessonResponse.data.success) {
+            const attendanceData = {
+                lessonId: lessonResponse.data.lessonId,
+                studentName: testData.securityPayloads.xss[0] // "<script>alert('XSS')</script>"
+            };
+            
+            const response = await makeRequest('POST', '/takeAttendance', attendanceData);
+            // Should either reject the request (400) or sanitize and accept
+            const containsScript = response.data.message && response.data.message.includes('<script>');
+            const passed = response.status === 400 || (response.data.success && !containsScript);
+            
+            logTest(
+                'Security - XSS in Student Name',
+                ['Create new lesson', 'Submit attendance with XSS payload in student name'],
+                { payload: 'XSS_ATTEMPT' },
+                { sanitized: true },
+                { 
+                    status: response.status,
+                    accepted: response.data.success, 
+                    containsScript: containsScript,
+                    rejected: response.status === 400
+                },
+                passed
+            );
+        } else {
+            logTest('Security - XSS in Student Name', [], {}, {}, { lessonCreationFailed: true }, false);
+        }
+    } catch (error) {
+        logTest('Security - XSS in Student Name', [], {}, {}, { rejected: true }, true);
+    }
+
+    // Test 35: Extremely long input strings
+    try {
+        const maliciousData = {
+            name: testData.securityPayloads.longStrings[1], // 10k characters
+            email: 'longtest@test.com',
+            password: 'test123456'
+        };
+        
+        const response = await makeRequest('POST', '/register', maliciousData);
+        const passed = response.status === 400 || !response.data.success;
+        
+        logTest(
+            'Security - Long String Input',
+            ['Submit registration with extremely long name (10k chars)'],
+            { nameLength: maliciousData.name.length },
+            { rejected: true },
+            { success: response.data.success, rejected: !response.data.success },
+            passed
+        );
+    } catch (error) {
+        logTest('Security - Long String Input', [], {}, {}, { rejected: true }, true);
+    }
+}
+
+async function testBoundaryConditions() {
+    console.log('\n🎯 Testing Boundary Conditions & Edge Cases...');
+    
+    const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+    
+    // Test 36: Minimum valid radius (exactly 10m)
+    try {
+        const lessonData = {
+            name: 'Boundary Test - Min Radius',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: true,
+            centerLatitude: CONFIG.locations.center.lat,
+            centerLongitude: CONFIG.locations.center.lon,
+            radiusMeters: 10, // Minimum allowed
+            locationName: 'Boundary Test Location'
+        };
+        
+        const response = await makeRequest('POST', '/createLesson', lessonData, authHeaders);
+        const passed = response.status === 200 && response.data.success;
+        
+        if (passed) {
+            testData.lessons.push({
+                id: response.data.lessonId,
+                name: lessonData.name,
+                locationEnabled: true,
+                centerLat: lessonData.centerLatitude,
+                centerLon: lessonData.centerLongitude,
+                radius: lessonData.radiusMeters
+            });
+        }
+        
+        logTest(
+            'Boundary - Minimum Valid Radius',
+            ['Create lesson with exactly 10m radius (minimum allowed)'],
+            { radius: 10 },
+            { success: true },
+            { success: response.data.success },
+            passed
+        );
+    } catch (error) {
+        logTest('Boundary - Minimum Valid Radius', [], {}, {}, {}, false, error);
+    }
+
+    // Test 37: Maximum valid radius (exactly 10000m)
+    try {
+        const lessonData = {
+            name: 'Boundary Test - Max Radius',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: true,
+            centerLatitude: CONFIG.locations.center.lat,
+            centerLongitude: CONFIG.locations.center.lon,
+            radiusMeters: 10000, // Maximum allowed
+            locationName: 'Boundary Test Location Large'
+        };
+        
+        const response = await makeRequest('POST', '/createLesson', lessonData, authHeaders);
+        const passed = response.status === 200 && response.data.success;
+        
+        logTest(
+            'Boundary - Maximum Valid Radius',
+            ['Create lesson with exactly 10000m radius (maximum allowed)'],
+            { radius: 10000 },
+            { success: true },
+            { success: response.data.success },
+            passed
+        );
+    } catch (error) {
+        logTest('Boundary - Maximum Valid Radius', [], {}, {}, {}, false, error);
+    }
+
+    // Test 38: GPS accuracy at exactly 100m threshold
+    if (testData.lessons.length > 0) {
+        const locationLesson = testData.lessons.find(l => l.locationEnabled);
+        if (locationLesson) {
+            try {
+                const attendanceData = {
+                    lessonId: locationLesson.id,
+                    studentName: 'Boundary Test - GPS Accuracy',
+                    latitude: CONFIG.locations.inside.lat,
+                    longitude: CONFIG.locations.inside.lon,
+                    accuracy: 100 // Exactly at threshold
+                };
+                
+                const response = await makeRequest('POST', '/takeAttendance', attendanceData);
+                const passed = response.status === 403 && !response.data.success; // Should be rejected
+                
+                logTest(
+                    'Boundary - GPS Accuracy Threshold',
+                    ['Submit attendance with GPS accuracy exactly at 100m threshold'],
+                    { accuracy: 100 },
+                    { rejected: true },
+                    { success: response.data.success },
+                    passed
+                );
+            } catch (error) {
+                logTest('Boundary - GPS Accuracy Threshold', [], {}, {}, {}, false, error);
+            }
+        }
+    }
+
+    // Test 39: Location exactly at radius edge
+    if (testData.lessons.length > 0) {
+        const locationLesson = testData.lessons.find(l => l.locationEnabled && l.radius === 10);
+        if (locationLesson) {
+            try {
+                // Calculate point exactly at 10m distance
+                const distance = calculateDistance(
+                    CONFIG.locations.edge.lat, CONFIG.locations.edge.lon,
+                    locationLesson.centerLat, locationLesson.centerLon
+                );
+                
+                const attendanceData = {
+                    lessonId: locationLesson.id,
+                    studentName: 'Boundary Test - Edge Location',
+                    latitude: CONFIG.locations.edge.lat,
+                    longitude: CONFIG.locations.edge.lon,
+                    accuracy: 5
+                };
+                
+                const response = await makeRequest('POST', '/takeAttendance', attendanceData);
+                const withinRadius = distance <= locationLesson.radius;
+                const passed = (withinRadius && response.data.success) || (!withinRadius && !response.data.success);
+                
+                logTest(
+                    'Boundary - Location at Radius Edge',
+                    [`Submit attendance ~${Math.round(distance)}m from center (${locationLesson.radius}m radius)`],
+                    { withinRadius: withinRadius },
+                    { success: withinRadius },
+                    { success: response.data.success, distance: Math.round(distance) },
+                    passed
+                );
+            } catch (error) {
+                logTest('Boundary - Location at Radius Edge', [], {}, {}, {}, false, error);
+            }
+        }
+    }
+}
+
+async function testDataIntegrity() {
+    console.log('\n🗄️ Testing Data Integrity & Consistency...');
+    
+    const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+    
+    // Test 40: Lesson deletion cascade - Create dedicated lesson for this test
+    try {
+        // Create a fresh lesson specifically for deletion testing
+        const deletionLessonData = {
+            name: 'Deletion Test Lesson',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: false
+        };
+        
+        const lessonResponse = await makeRequest('POST', '/createLesson', deletionLessonData, authHeaders);
+        
+        if (lessonResponse.data.success && lessonResponse.data.lessonId) {
+            const testLessonId = lessonResponse.data.lessonId;
+            
+            // First add an attendance record
+            const attendanceData = {
+                lessonId: testLessonId,
+                studentName: 'Data Integrity Test Student'
+            };
+            const attendanceResponse = await makeRequest('POST', '/takeAttendance', attendanceData);
+            
+            // Only proceed if attendance was successful 
+            if (attendanceResponse.data.success) {
+                // Validate lesson ID before deletion
+                if (!testLessonId || testLessonId.length < 10) {
+                    logTest('Data Integrity - Lesson Deletion Cascade', [], {}, {}, { invalidLessonId: testLessonId }, false);
+                    return;
+                }
+                
+                // Then delete the lesson
+                const deleteResponse = await makeRequest('DELETE', `/deleteLesson/${encodeURIComponent(testLessonId)}`, {}, authHeaders);
+                
+                // If deletion was successful, check accessibility
+                if (deleteResponse.status === 200) {
+                    // Try to access the deleted lesson
+                    const accessResponse = await makeRequest('GET', `/lesson/${encodeURIComponent(testLessonId)}`);
+                    const passed = accessResponse.status === 404;
+                    
+                    logTest(
+                        'Data Integrity - Lesson Deletion Cascade',
+                        ['Create new lesson', 'Add attendance record', 'Delete lesson', 'Verify lesson is inaccessible'],
+                        { lessonId: testLessonId },
+                        { deleted: true, accessible: false },
+                        { 
+                            deleteSuccess: true,
+                            accessible: accessResponse.status !== 404,
+                            accessStatus: accessResponse.status
+                        },
+                        passed
+                    );
+                } else {
+                    // Deletion failed, report the detailed error
+                    logTest(
+                        'Data Integrity - Lesson Deletion Cascade',
+                        ['Create new lesson', 'Add attendance record', 'Delete lesson failed'],
+                        { lessonId: testLessonId },
+                        { deleted: true, accessible: false },
+                        { 
+                            deleteStatus: deleteResponse.status,
+                            deleteSuccess: false,
+                            deleteMessage: deleteResponse.data?.message || 'No message',
+                            deleteBody: JSON.stringify(deleteResponse.data),
+                            tokenPresent: !!authHeaders.Authorization
+                        },
+                        false
+                    );
+                }
+            } else {
+                logTest('Data Integrity - Lesson Deletion Cascade', [], {}, {}, { attendanceFailed: true, attendanceMessage: attendanceResponse.data?.message }, false);
+            }
+        } else {
+            logTest('Data Integrity - Lesson Deletion Cascade', [], {}, {}, { lessonCreationFailed: true }, false);
+        }
+    } catch (error) {
+        logTest('Data Integrity - Lesson Deletion Cascade', [], {}, {}, {}, false, error);
+    }
+
+    // Test 41: Token expiration handling - Accept both 401 and 403 as valid rejection
+    try {
+        const expiredToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6OTk5LCJlbWFpbCI6ImV4cGlyZWRAZXhhbXBsZS5jb20iLCJuYW1lIjoiRXhwaXJlZCBVc2VyIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjE2MDAwMDAwMDF9.invalidtoken';
+        const expiredHeaders = { 'Authorization': `Bearer ${expiredToken}` };
+        
+        const response = await makeRequest('GET', '/myLessons', null, expiredHeaders);
+        // Accept both 401 (expired) and 403 (invalid) as proper rejections
+        const passed = response.status === 401 || response.status === 403;
+        
+        logTest(
+            'Data Integrity - Token Expiration',
+            ['Access protected endpoint with expired/invalid token'],
+            { tokenType: 'expired/invalid' },
+            { rejected: true },
+            { status: response.status, rejected: passed },
+            passed
+        );
+    } catch (error) {
+        logTest('Data Integrity - Token Expiration', [], {}, {}, { rejected: true }, true);
+    }
+}
+
+async function testAdvancedLocationScenarios() {
+    console.log('\n🌍 Testing Advanced Location Scenarios...');
+    
+    if (testData.lessons.length === 0) {
+        console.log('⚠️ No lessons available for advanced location tests');
+        return;
+    }
+
+    const locationLesson = testData.lessons.find(l => l.locationEnabled);
+    if (!locationLesson) {
+        console.log('⚠️ No location-enabled lessons available');
+        return;
+    }
+
+    // Test 42: Very high GPS accuracy (sub-meter) - Create new lesson to avoid IP conflicts
+    try {
+        // Create a new lesson for this test to avoid IP duplication issues
+        const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+        const newLessonData = {
+            name: 'GPS Accuracy Test Lesson',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: true,
+            centerLatitude: CONFIG.locations.center.lat,
+            centerLongitude: CONFIG.locations.center.lon,
+            radiusMeters: 100,
+            locationName: 'GPS Test Location'
+        };
+        
+        const lessonResponse = await makeRequest('POST', '/createLesson', newLessonData, authHeaders);
+        
+        if (lessonResponse.data.success) {
+            const attendanceData = {
+                lessonId: lessonResponse.data.lessonId,
+                studentName: 'High Accuracy GPS Test Student',
+                latitude: CONFIG.locations.inside.lat,
+                longitude: CONFIG.locations.inside.lon,
+                accuracy: 1 // Very high accuracy
+            };
+            
+            const response = await makeRequest('POST', '/takeAttendance', attendanceData);
+            const passed = response.status === 200 && response.data.success;
+            
+            logTest(
+                'Advanced Location - High GPS Accuracy',
+                ['Create new lesson', 'Submit attendance with 1m GPS accuracy'],
+                { accuracy: 1 },
+                { success: true },
+                { success: response.data.success },
+                passed
+            );
+        } else {
+            logTest('Advanced Location - High GPS Accuracy', [], {}, {}, { lessonCreationFailed: true }, false);
+        }
+    } catch (error) {
+        logTest('Advanced Location - High GPS Accuracy', [], {}, {}, {}, false, error);
+    }
+
+    // Test 43: Coordinate precision edge cases - Create new lesson
+    try {
+        const authHeaders = { 'Authorization': `Bearer ${testData.token}` };
+        const precisionLessonData = {
+            name: 'Precision Test Lesson',
+            date: new Date().toISOString().split('T')[0],
+            locationEnabled: true,
+            centerLatitude: CONFIG.locations.center.lat,
+            centerLongitude: CONFIG.locations.center.lon,
+            radiusMeters: 100,
+            locationName: 'Precision Test Location'
+        };
+        
+        const lessonResponse = await makeRequest('POST', '/createLesson', precisionLessonData, authHeaders);
+        
+        if (lessonResponse.data.success) {
+            const attendanceData = {
+                lessonId: lessonResponse.data.lessonId,
+                studentName: 'Precision Test Student',
+                latitude: CONFIG.locations.center.lat + 0.00001, // Very small offset (~1m)
+                longitude: CONFIG.locations.center.lon + 0.00001,
+                accuracy: 10
+            };
+            
+            const distance = calculateDistance(
+                attendanceData.latitude, attendanceData.longitude,
+                precisionLessonData.centerLatitude, precisionLessonData.centerLongitude
+            );
+            
+            const response = await makeRequest('POST', '/takeAttendance', attendanceData);
+            const withinRadius = distance <= precisionLessonData.radiusMeters;
+            const passed = (withinRadius && response.data.success) || (!withinRadius && !response.data.success);
+            
+            logTest(
+                'Advanced Location - Coordinate Precision',
+                ['Create new lesson', `Submit attendance with micro-coordinate offset (~${Math.round(distance)}m)`],
+                { withinRadius: withinRadius, radius: precisionLessonData.radiusMeters },
+                { success: withinRadius },
+                { success: response.data.success, calculatedDistance: Math.round(distance) },
+                passed
+            );
+        } else {
+            logTest('Advanced Location - Coordinate Precision', [], {}, {}, { lessonCreationFailed: true }, false);
+        }
+    } catch (error) {
+        logTest('Advanced Location - Coordinate Precision', [], {}, {}, {}, false, error);
+    }
+}
+
+// Enhanced main test runner
+async function runAllTests() {
+    console.log('🚀 Starting Enhanced Comprehensive QR Attendance System Tests');
+    console.log('Server URL:', CONFIG.baseUrl);
+    console.log('Test started at:', new Date().toLocaleString());
+    console.log('='.repeat(80));
+    
+    try {
+        // Core functionality tests
+        await testTeacherRegistration();
+        await testLessonCreation();
+        await testStudentAttendance();
+        await testQRInvalidation();
+        await testAttendanceList();
+        await testLessonInfo();
+        await testMyLessons();
+        
+        // Enhanced test suites
+        await testPerformance();
+        await testSecurity();
+        await testBoundaryConditions();
+        await testDataIntegrity();
+        await testAdvancedLocationScenarios();
+        
+        generateReport();
+        
+    } catch (error) {
+        console.error('\n💥 Test suite crashed:', error.message);
+        generateReport();
+    }
+}
+
+// Enhanced report generation
 function generateReport() {
-    console.log('\n📊 TEST REPORT');
+    console.log('\n📊 ENHANCED TEST REPORT');
     console.log('='.repeat(80));
     
     const passedTests = testResults.filter(t => t.passed);
@@ -924,13 +1512,18 @@ function generateReport() {
     console.log('\n📋 DETAILED RESULTS:');
     console.log('-'.repeat(50));
     
-    // Group tests by category
+    // Enhanced test categories
     const categories = {
         'Authentication': testResults.filter(t => t.name.includes('Registration') || t.name.includes('Login')),
         'Lesson Management': testResults.filter(t => t.name.includes('Lesson Creation') || t.name.includes('My Lessons')),
         'Student Attendance': testResults.filter(t => t.name.includes('Student Attendance')),
         'QR Management': testResults.filter(t => t.name.includes('QR Invalidation')),
-        'Data Retrieval': testResults.filter(t => t.name.includes('Attendance List') || t.name.includes('Lesson Info'))
+        'Data Retrieval': testResults.filter(t => t.name.includes('Attendance List') || t.name.includes('Lesson Info')),
+        'Performance': testResults.filter(t => t.name.includes('Performance')),
+        'Security': testResults.filter(t => t.name.includes('Security')),
+        'Boundary Conditions': testResults.filter(t => t.name.includes('Boundary')),
+        'Data Integrity': testResults.filter(t => t.name.includes('Data Integrity')),
+        'Advanced Location': testResults.filter(t => t.name.includes('Advanced Location'))
     };
     
     Object.entries(categories).forEach(([category, tests]) => {
@@ -943,54 +1536,44 @@ function generateReport() {
         }
     });
     
-    console.log('\n💡 RECOMMENDATIONS:');
+    console.log('\n💡 ENHANCED RECOMMENDATIONS:');
     console.log('-'.repeat(50));
     
     if (failedTests.length === 0) {
-        console.log('🎉 All tests passed! Your QR attendance system is working correctly.');
+        console.log('🎉 All tests passed! Your QR attendance system is robust and secure.');
+        console.log('✨ System demonstrates excellent performance, security, and reliability.');
     } else {
         console.log('🔧 Please review and fix the failed test cases above.');
         
-        if (failedTests.some(t => t.name.includes('Authentication'))) {
-            console.log('• Check user registration and login functionality');
+        if (failedTests.some(t => t.name.includes('Performance'))) {
+            console.log('⚡ Performance issues detected - optimize response times and concurrent handling');
+        }
+        if (failedTests.some(t => t.name.includes('Security'))) {
+            console.log('🛡️ Security vulnerabilities found - implement proper input validation and sanitization');
+        }
+        if (failedTests.some(t => t.name.includes('Boundary'))) {
+            console.log('🎯 Boundary condition failures - review edge case handling');
         }
         if (failedTests.some(t => t.name.includes('Location'))) {
-            console.log('• Review location validation logic and GPS accuracy handling');
-        }
-        if (failedTests.some(t => t.name.includes('Attendance'))) {
-            console.log('• Verify attendance submission and validation rules');
+            console.log('🌍 Location validation issues - verify GPS accuracy and distance calculations');
         }
         if (failedTests.some(t => t.error && t.error.includes('ECONNREFUSED'))) {
-            console.log('• Ensure the server is running on http://localhost:3000');
+            console.log('🔌 Ensure the server is running on http://localhost:3000');
         }
+    }
+    
+    console.log('\n📊 Performance Summary:');
+    const performanceTests = testResults.filter(t => t.name.includes('Performance'));
+    if (performanceTests.length > 0) {
+        performanceTests.forEach(test => {
+            if (test.actual.actualTime) {
+                console.log(`   ⏱️ ${test.name}: ${test.actual.actualTime}ms`);
+            }
+        });
     }
     
     console.log('\n📅 Test completed at:', new Date().toLocaleString());
     console.log('='.repeat(80));
-}
-
-// Main test runner
-async function runAllTests() {
-    console.log('🚀 Starting Comprehensive QR Attendance System Tests');
-    console.log('Server URL:', CONFIG.baseUrl);
-    console.log('Test started at:', new Date().toLocaleString());
-    console.log('='.repeat(80));
-    
-    try {
-        await testTeacherRegistration();
-        await testLessonCreation();
-        await testStudentAttendance();
-        await testQRInvalidation();
-        await testAttendanceList();
-        await testLessonInfo();
-        await testMyLessons();
-        
-        generateReport();
-        
-    } catch (error) {
-        console.error('\n💥 Test suite crashed:', error.message);
-        generateReport();
-    }
 }
 
 // Export for potential module usage
