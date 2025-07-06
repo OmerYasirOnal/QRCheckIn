@@ -832,12 +832,14 @@ app.post('/takeAttendance', (req, res) => {
             }
         }
 
-        // Aynı IP adresinden bu derse daha önce yoklama yapılmış mı kontrol et
-        db.get('SELECT * FROM attendances WHERE lesson_id = ? AND ip_address = ?', 
-            [lessonId, clientIP], 
+        // Aynı öğrencinin bu derse daha önce yoklama yapıp yapmadığını kontrol et
+        console.log(`🔍 Yoklama kontrolü - Ders: ${lessonId}, Öğrenci: ${sanitizedStudentName}, IP: ${clientIP}`);
+        
+        db.get('SELECT * FROM attendances WHERE lesson_id = ? AND student_name = ?', 
+            [lessonId, sanitizedStudentName], 
             (err, row) => {
                 if (err) {
-                    console.error('Yoklama kontrol hatası:', err.message);
+                    console.error('❌ Yoklama kontrol hatası:', err.message);
                     return res.status(500).json({ 
                         success: false, 
                         message: 'Yoklama kontrolü yapılamadı.' 
@@ -845,9 +847,10 @@ app.post('/takeAttendance', (req, res) => {
                 }
                 
                 if (row) {
+                    console.log(`⚠️ Tekrar yoklama girişimi - ${sanitizedStudentName} daha önce ${row.created_at} tarihinde yoklama yapmış`);
                     return res.status(409).json({ 
                         success: false, 
-                        message: 'Bu cihazdan daha önce yoklama yapılmış. Bir cihazdan sadece bir kez yoklama yapılabilir.' 
+                        message: 'Bu ders için daha önce yoklama yapmışsınız. Bir derse sadece bir kez yoklama yapabilirsiniz.' 
                     });
                 }
                 
@@ -870,19 +873,23 @@ app.post('/takeAttendance', (req, res) => {
                 
                 db.run(insertQuery, insertValues, function(err) {
                     if (err) {
-                        console.error('Yoklama kaydetme hatası:', err.message);
+                        console.error('❌ Yoklama kaydetme hatası:', err.message);
                         return res.status(500).json({ 
                             success: false, 
                             message: 'Yoklama kaydedilemedi.' 
                         });
                     }
                     
+                    const distance = lesson.location_enabled && latitude && longitude ? 
+                        Math.round(calculateDistance(latitude, longitude, lesson.center_latitude, lesson.center_longitude)) : null;
+                    
+                    console.log(`✅ Yoklama başarılı - Öğrenci: ${sanitizedStudentName}, Ders: ${lesson.name}, IP: ${clientIP}${distance ? `, Mesafe: ${distance}m` : ''}`);
+                    
                     res.json({ 
                         success: true, 
                         message: 'Yoklama başarıyla kaydedildi!',
                         locationEnabled: lesson.location_enabled ? true : false,
-                        distance: lesson.location_enabled && latitude && longitude ? 
-                            Math.round(calculateDistance(latitude, longitude, lesson.center_latitude, lesson.center_longitude)) : null
+                        distance: distance
                     });
                 });
             }

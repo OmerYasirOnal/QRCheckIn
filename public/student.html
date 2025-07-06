@@ -472,7 +472,10 @@
                     requestBody.latitude = locationData.latitude;
                     requestBody.longitude = locationData.longitude;
                     requestBody.accuracy = locationData.accuracy;
+                    console.log(`📍 Konum bilgisi eklendi - Lat: ${locationData.latitude}, Lon: ${locationData.longitude}, Doğruluk: ${locationData.accuracy}m`);
                 }
+
+                console.log(`🚀 Yoklama gönderiliyor - Öğrenci: ${studentName}, Ders: ${lessonId}`);
 
                 const response = await fetch('/takeAttendance', {
                     method: 'POST',
@@ -483,8 +486,11 @@
                 });
                 
                 const data = await response.json();
+                console.log(`📥 Sunucu yanıtı:`, { status: response.status, data });
                 
                 if (data.success) {
+                    console.log(`✅ Yoklama başarılı - ${studentName}`);
+                    
                     // Başarılı yoklama - localStorage'a kaydet
                     const attendanceKey = `attendance_${lessonId}`;
                     localStorage.setItem(attendanceKey, 'true');
@@ -494,15 +500,21 @@
                     // Başarı sayfasına yönlendir
                     window.location.href = `success.html?name=${encodeURIComponent(studentName)}&lessonId=${lessonId}`;
                 } else {
+                    console.log(`❌ Yoklama başarısız - ${data.message}`);
                     throw new Error(data.message);
                 }
             } catch (error) {
+                console.log(`💥 Hata oluştu:`, error);
                 loading.classList.remove('show');
                 
-                if (error.message.includes('zaten yoklama yapıldı') || error.message.includes('already attended')) {
+                if (error.message.includes('daha önce yoklama yapmışsınız') || error.message.includes('zaten yoklama yapıldı') || error.message.includes('already attended')) {
+                    console.log(`🔄 Tekrar yoklama girişimi tespit edildi, localStorage güncelleniyor`);
+                    
                     // Sunucu tarafında da kontrol edilmiş, localStorage'a kaydet
                     const attendanceKey = `attendance_${lessonId}`;
                     localStorage.setItem(attendanceKey, 'true');
+                    localStorage.setItem(`${attendanceKey}_name`, studentName);
+                    localStorage.setItem(`${attendanceKey}_time`, new Date().toISOString());
                     
                     // Sayfayı yenile
                     window.location.reload();

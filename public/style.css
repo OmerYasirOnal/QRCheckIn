@@ -777,6 +777,7 @@ input::placeholder {
     overflow-y: auto;
     position: relative;
     box-shadow: var(--shadow-xl);
+    padding: 2rem;
 }
 
 .modal-header {
