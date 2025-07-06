@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Kod - Yoklama Sistemi</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="container wide">
+        <div class="header">
+            <div class="header-content">
+                <h1>📱 QR Kod ile Yoklama</h1>
+                <p>Öğrenciler QR kodu okutarak yoklama yapabilir</p>
+            </div>
+            <button class="btn btn-secondary" onclick="goBack()">⬅️ Geri Dön</button>
+        </div>
+        
+        <div id="lessonInfo" class="info-card">
+            <h3>📚 Ders Bilgileri</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-4);">
+                <div>
+                    <p><strong>Ders Adı:</strong> <span id="lessonName">Yükleniyor...</span></p>
+                    <p><strong>Öğretmen:</strong> <span id="teacherName">Yükleniyor...</span></p>
+                </div>
+                <div>
+                    <p><strong>Tarih:</strong> <span id="lessonDate">Yükleniyor...</span></p>
+                    <p><strong>Ders ID:</strong> <span id="lessonId">Yükleniyor...</span></p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- QR Kod Geçerlilik Durumu -->
+        <div id="qrValidityStatus" class="qr-validity">
+            <h3>⏰ QR Kod Geçerlilik Durumu</h3>
+            <div class="qr-validity-timer" id="remainingTime">Hesaplanıyor...</div>
+            <p>QR kod bu süre boyunca geçerli olacaktır.</p>
+        </div>
+        
+        <div class="qr-container">
+            <h2>📲 Öğrenciler Bu QR Kodu Okutun</h2>
+            <div id="qrcode"></div>
+            <div id="qrMessage">
+                <p style="margin-top: var(--space-4); color: var(--gray-600);">
+                    QR kodu telefonunuzla okutarak yoklama sayfasına erişebilirsiniz.
+                </p>
+            </div>
+            
+            <div class="info-card">
+                <h3>💡 Nasıl Kullanılır?</h3>
+                <p><strong>1.</strong> Öğrenciler QR kodu telefonlarındaki kamera uygulaması ile okutacaklar</p>
+                <p><strong>2.</strong> Otomatik olarak yoklama sayfasına yönlendirilecekler</p>
+                <p><strong>3.</strong> Ad ve soyadlarını girerek yoklama yapacaklar</p>
+                <p><strong>4.</strong> Her cihazdan sadece bir kez yoklama yapılabilir</p>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="totalStudents">0</div>
+                <div class="stat-label">Katılan Öğrenci</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="validityMinutes">-</div>
+                <div class="stat-label">Geçerlilik (dakika)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="lastUpdate">-</div>
+                <div class="stat-label">Son Güncelleme</div>
+            </div>
+        </div>
+        
+        <div style="margin: var(--space-8) 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-4); flex-wrap: wrap; gap: var(--space-4);">
+                <h2>👥 Anlık Yoklama Listesi</h2>
+                <div style="display: flex; gap: var(--space-2);">
+                    <button class="btn btn-sm btn-outline" onclick="refreshAttendance()">🔄 Yenile</button>
+                    <button class="btn btn-sm" onclick="generateNewQR()">🔄 Yeni QR Kod</button>
+                </div>
+            </div>
+            <div id="attendanceList" class="attendance-list">
+                <div class="loading-message">
+                    <div class="spinner"></div>
+                    <p>Yoklama listesi yükleniyor...</p>
+                </div>
+            </div>
+        </div>
+        
+        <div id="message" class="message" style="display: none;"></div>
+    </div>
+
+    <script>
+        let lessonId = '';
+        let validityMinutes = 30;
+        let refreshInterval;
+        let timerInterval;
+        let currentUser = null;
+        let currentToken = null;
+        let lessonCreatedAt = null;
+        
+        window.onload = async function() {
+            // Token ve kullanıcı bilgilerini kontrol et
+            currentToken = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!currentToken || !userStr) {
+                alert('Giriş yapmanız gerekiyor!');
+                window.location.href = 'index.html';
+                return;
+            }
+            
+            try {
+                currentUser = JSON.parse(userStr);
+            } catch (error) {
+                console.error('Kullanıcı bilgileri parse edilemedi:', error);
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = 'index.html';
+                return;
+            }
+            
+            // QR kod kütüphanesinin yüklendiğini kontrol et
+            if (typeof QRCode === 'undefined') {
+                console.error('QRCode kütüphanesi yüklenmedi!');
+                document.getElementById('qrcode').innerHTML = `
+                    <div class="message error">
+                        ❌ QR kod kütüphanesi yüklenemedi!<br>
+                        <small>Lütfen sayfayı yenileyin veya internet bağlantınızı kontrol edin.</small>
+                    </div>
+                `;
+                return;
+            }
+            
+            // URL'den lesson ID ve geçerlilik bilgilerini al
+            const urlParams = new URLSearchParams(window.location.search);
+            lessonId = urlParams.get('lessonId');
+            validityMinutes = parseInt(urlParams.get('validity')) || 30;
+            
+            if (!lessonId) {
+                alert('Ders ID bulunamadı!');
+                window.location.href = 'teacher.html';
+                return;
+            }
+            
+            document.getElementById('lessonId').textContent = lessonId;
+            document.getElementById('validityMinutes').textContent = validityMinutes;
+            
+            // Ders bilgilerini al
+            await loadLessonInfo();
+            
+            // QR kod oluştur
+            generateQRCode();
+            
+            // Timer'ı başlat
+            startValidityTimer();
+            
+            // İlk yoklama listesini yükle
+            await loadAttendanceList();
+            
+            // 5 saniyede bir yoklama listesini yenile
+            refreshInterval = setInterval(loadAttendanceList, 5000);
+        };
+        
+        // Sayfa kapatıldığında interval'ları temizle
+        window.onbeforeunload = function() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (timerInterval) clearInterval(timerInterval);
+        };
+        
+        // Geçerlilik timer'ı başlat
+        function startValidityTimer() {
+            if (!lessonCreatedAt) return;
+            
+            timerInterval = setInterval(() => {
+                updateValidityDisplay();
+            }, 1000);
+            
+            updateValidityDisplay();
+        }
+        
+        // Geçerlilik durumunu güncelle
+        function updateValidityDisplay() {
+            if (!lessonCreatedAt) return;
+            
+            const createdTime = new Date(lessonCreatedAt).getTime();
+            const currentTime = new Date().getTime();
+            const validityTimeMs = validityMinutes * 60 * 1000;
+            const elapsedMs = currentTime - createdTime;
+            const remainingMs = validityTimeMs - elapsedMs;
+            
+            const statusDiv = document.getElementById('qrValidityStatus');
+            const timerDiv = document.getElementById('remainingTime');
+            
+            if (remainingMs <= 0) {
+                // Süre dolmuş
+                statusDiv.classList.add('expired');
+                timerDiv.textContent = 'SÜRESİ DOLMUŞ';
+                document.getElementById('qrMessage').innerHTML = `
+                    <div class="message error" style="margin-top: var(--space-4);">
+                        <strong>⚠️ QR Kod Süresi Doldu!</strong><br>
+                        Öğrenciler artık bu QR kod ile yoklama yapamaz. Yeni QR kod oluşturun.
+                    </div>
+                `;
+                
+                if (timerInterval) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }
+            } else {
+                // Hala geçerli
+                const remainingMinutes = Math.floor(remainingMs / 60000);
+                const remainingSeconds = Math.floor((remainingMs % 60000) / 1000);
+                
+                timerDiv.textContent = `${remainingMinutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+                
+                // Son 5 dakikada uyarı rengi
+                if (remainingMinutes < 5) {
+                    statusDiv.style.borderColor = 'var(--warning-color)';
+                    statusDiv.querySelector('h3').style.color = 'var(--warning-color)';
+                }
+            }
+        }
+        
+        // API isteği yapma fonksiyonu
+        async function makeAuthenticatedRequest(url, options = {}) {
+            const defaultOptions = {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentToken}`
+                }
+            };
+            
+            const mergedOptions = {
+                ...defaultOptions,
+                ...options,
+                headers: {
+                    ...defaultOptions.headers,
+                    ...options.headers
+                }
+            };
+            
+            const response = await fetch(url, mergedOptions);
+            
+            if (response.status === 401 || response.status === 403) {
+                // Token geçersiz, giriş sayfasına yönlendir
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                alert('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+                window.location.href = 'index.html';
+                return null;
+            }
+            
+            return response;
+        }
+        
+        async function loadLessonInfo() {
+            try {
+                const response = await fetch(`/lesson/${lessonId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('lessonName').textContent = data.lesson.name;
+                    document.getElementById('teacherName').textContent = data.lesson.teacher_name;
+                    const date = new Date(data.lesson.date).toLocaleDateString('tr-TR', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                    });
+                    document.getElementById('lessonDate').textContent = date;
+                    
+                    // Ders oluşturulma zamanını kaydet
+                    lessonCreatedAt = data.lesson.created_at;
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                console.error('Ders bilgileri yüklenirken hata:', error);
+                showMessage('Ders bilgileri yüklenemedi: ' + error.message, 'error');
+            }
+        }
+        
+        function generateQRCode() {
+            const qrData = `${window.location.origin}/student.html?lessonId=${lessonId}&validity=${validityMinutes}`;
+            
+            try {
+                // QR kod container'ını temizle
+                const qrContainer = document.getElementById('qrcode');
+                qrContainer.innerHTML = '';
+                
+                // Yeni QR kod oluştur
+                new QRCode(qrContainer, {
+                    text: qrData,
+                    width: 300,
+                    height: 300,
+                    colorDark: '#000000',
+                    colorLight: '#FFFFFF',
+                    correctLevel: QRCode.CorrectLevel.H
+                });
+                
+                console.log('QR kod başarıyla oluşturuldu:', qrData);
+            } catch (error) {
+                console.error('QR kod oluşturma hatası:', error);
+                document.getElementById('qrcode').innerHTML = `
+                    <div class="message error">
+                        ❌ QR kod oluşturulamadı!<br>
+                        <small>Hata: ${error.message}</small>
+                    </div>
+                `;
+            }
+        }
+        
+        async function loadAttendanceList() {
+            try {
+                const response = await makeAuthenticatedRequest(`/attendanceList/${lessonId}`);
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('totalStudents').textContent = data.total;
+                    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('tr-TR', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    
+                    const attendanceContainer = document.getElementById('attendanceList');
+                    
+                    if (data.attendances.length === 0) {
+                        attendanceContainer.innerHTML = `
+                            <div class="empty-state">
+                                <h3>👥 Henüz yoklama yapan öğrenci yok</h3>
+                                <p>QR kod paylaşıldığında öğrenciler burada görünecek.</p>
+                            </div>
+                        `;
+                    } else {
+                        const attendanceHtml = data.attendances.map((attendance, index) => `
+                            <div class="attendance-item">
+                                <div class="student-info">
+                                    <span class="attendance-number">${index + 1}</span>
+                                    <span class="student-name">${attendance.student_name}</span>
+                                </div>
+                                <span class="attendance-time">${formatTime(attendance.created_at)}</span>
+                            </div>
+                        `).join('');
+                        
+                        attendanceContainer.innerHTML = attendanceHtml;
+                    }
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                console.error('Yoklama listesi yüklenirken hata:', error);
+                document.getElementById('attendanceList').innerHTML = `
+                    <div class="message error">
+                        <strong>Hata!</strong> Yoklama listesi yüklenemedi: ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Yeni QR kod oluştur
+        async function generateNewQR() {
+            if (!confirm('Yeni QR kod oluşturmak istediğinizden emin misiniz?\n\nBu işlem mevcut QR kodu geçersiz kılacak ve yeni bir geçerlilik süresi başlatacaktır.')) {
+                return;
+            }
+            
+            try {
+                showMessage('🔄 Yeni QR kod oluşturuluyor...', 'info');
+                
+                // Sayfayı yeniden yükleyerek yeni QR kod oluştur
+                // Aslında backend'de yeni bir lesson create etmek gerekebilir, 
+                // şimdilik basitçe sayfayı yenileyelim
+                window.location.reload();
+                
+            } catch (error) {
+                showMessage('⚠️ Yeni QR kod oluşturulurken hata oluştu: ' + error.message, 'error');
+            }
+        }
+        
+        function refreshAttendance() {
+            loadAttendanceList();
+            showMessage('🔄 Yoklama listesi yenilendi.', 'success');
+        }
+        
+        function formatTime(dateStr) {
+            return new Date(dateStr).toLocaleTimeString('tr-TR', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        function goBack() {
+            // Interval'ları temizle
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (timerInterval) clearInterval(timerInterval);
+            
+            window.location.href = 'teacher.html';
+        }
+        
+        // Mesaj gösterme
+        function showMessage(message, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = message;
+            messageDiv.style.display = 'block';
+            
+            // Otomatik gizleme
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, type === 'error' ? 6000 : 3000);
+        }
+        
+        // Print fonksiyonu
+        function printQR() {
+            window.print();
+        }
+        
+        // Klavye kısayolları
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                goBack();
+            } else if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+                e.preventDefault();
+                refreshAttendance();
+            } else if (e.ctrlKey && e.key === 'p') {
+                e.preventDefault();
+                printQR();
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Öğretmen Dashboard - QR Yoklama Sistemi</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container wide">
+        <div class="header">
+            <div class="header-content">
+                <h1>📋 Öğretmen Dashboard</h1>
+                <p>Hoş geldiniz, <span id="teacherName">-</span>!</p>
+            </div>
+            <button class="btn btn-secondary" onclick="logout()">🚪 Çıkış Yap</button>
+        </div>
+        
+        <!-- Sekme Navigasyon -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="showTab('lessons')">📚 Derslerim</button>
+            <button class="tab-button" onclick="showTab('create')">➕ Yeni Ders</button>
+        </div>
+        
+        <!-- Dersler Listesi -->
+        <div id="lessonsTab" class="tab-content active">
+            <h2>📚 Derslerim</h2>
+            <div id="lessonsContainer">
+                <div class="loading-message">
+                    <div class="spinner"></div>
+                    <p>Dersler yükleniyor...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Yeni Ders Oluştur -->
+        <div id="createTab" class="tab-content">
+            <h2>➕ Yeni Ders Oluştur</h2>
+            
+            <div class="info-card">
+                <h3>💡 Bilgi</h3>
+                <p>Yeni bir ders oluşturduğunuzda, öğrencilerinizin yoklama yapması için QR kod üretilir. QR kodun geçerlilik süresini aşağıdan ayarlayabilirsiniz.</p>
+            </div>
+            
+            <form id="lessonForm">
+                <div class="form-group">
+                    <label for="lessonName">Ders Adı</label>
+                    <input type="text" id="lessonName" name="lessonName" required 
+                           placeholder="Örn: Matematik 101, Fizik Dersi, İngilizce" autocomplete="off">
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lessonDate">Ders Tarihi</label>
+                        <input type="date" id="lessonDate" name="lessonDate" required readonly>
+                        <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
+                            Ders tarihi otomatik olarak bugünün tarihi olarak ayarlanır.
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="qrValidity">QR Kod Geçerlilik Süresi</label>
+                        <select id="qrValidity" name="qrValidity" required>
+                            <option value="10">10 Dakika</option>
+                            <option value="15">15 Dakika</option>
+                            <option value="20">20 Dakika</option>
+                            <option value="30" selected>30 Dakika</option>
+                            <option value="45">45 Dakika</option>
+                            <option value="60">60 Dakika</option>
+                        </select>
+                        <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
+                            Bu süre sonunda QR kod geçersiz hale gelecektir.
+                        </small>
+                    </div>
+                </div>
+                
+                <div class="info-card warning">
+                    <h3>⚠️ Önemli</h3>
+                    <p><strong>QR Kod Geçerlilik:</strong> Belirlediğiniz süre sonunda QR kod otomatik olarak geçersiz hale gelir. Öğrenciler süresi dolmuş QR kodlarla yoklama yapamazlar.</p>
+                    <p><strong>Yeni QR Kod:</strong> Gerekirse aynı ders için yeni bir QR kod oluşturabilirsiniz.</p>
+                </div>
+                
+                <button type="submit" class="btn btn-lg btn-full">🎯 Ders Oluştur ve QR Kod Üret</button>
+            </form>
+        </div>
+        
+        <!-- Yoklama Listesi Modal -->
+        <div id="attendanceModal" class="modal">
+            <div class="modal-content">
+                <button class="close" onclick="closeAttendanceModal()">&times;</button>
+                <div class="modal-header">
+                    <h2 id="attendanceTitle">📊 Yoklama Listesi</h2>
+                </div>
+                <div id="attendanceContainer">
+                    <div class="loading-message">
+                        <div class="spinner"></div>
+                        <p>Yoklama listesi yükleniyor...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="message" class="message" style="display: none;"></div>
+        
+        <div class="loading" id="loading">
+            <div class="loading-message">
+                <div class="spinner"></div>
+                <p>İşlem yapılıyor...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let currentToken = null;
+        let lessons = [];
+        
+        // Sayfa yüklendiğinde
+        window.onload = function() {
+            // Token ve kullanıcı bilgilerini kontrol et
+            currentToken = localStorage.getItem('token');
+            const userStr = localStorage.getItem('user');
+            
+            if (!currentToken || !userStr) {
+                window.location.href = 'index.html';
+                return;
+            }
+            
+            try {
+                currentUser = JSON.parse(userStr);
+                document.getElementById('teacherName').textContent = currentUser.name;
+                
+                // Bugünün tarihini varsayılan olarak ayarla (read-only)
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('lessonDate').value = today;
+                
+                // Dersleri yükle
+                loadLessons();
+            } catch (error) {
+                console.error('Kullanıcı bilgileri parse edilemedi:', error);
+                logout();
+            }
+        };
+        
+        // Çıkış yapma
+        function logout() {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'index.html';
+        }
+        
+        // Sekme değiştirme
+        function showTab(tabName) {
+            // Tüm sekmeleri gizle
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Tüm sekme butonlarını pasif yap
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Seçili sekmeyi göster
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            event.target.classList.add('active');
+            
+            hideMessage();
+        }
+        
+        // Mesaj gösterme
+        function showMessage(message, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = message;
+            messageDiv.style.display = 'block';
+            
+            // Otomatik gizleme
+            setTimeout(() => {
+                hideMessage();
+            }, type === 'error' ? 7000 : 4000);
+        }
+        
+        // Mesaj gizleme
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+        
+        // Loading gösterme/gizleme
+        function showLoading(show = true) {
+            const loading = document.getElementById('loading');
+            if (show) {
+                loading.classList.add('show');
+            } else {
+                loading.classList.remove('show');
+            }
+        }
+        
+        // API isteği yapma fonksiyonu
+        async function makeAuthenticatedRequest(url, options = {}) {
+            const defaultOptions = {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${currentToken}`
+                }
+            };
+            
+            const mergedOptions = {
+                ...defaultOptions,
+                ...options,
+                headers: {
+                    ...defaultOptions.headers,
+                    ...options.headers
+                }
+            };
+            
+            const response = await fetch(url, mergedOptions);
+            
+            if (response.status === 401 || response.status === 403) {
+                // Token geçersiz, giriş sayfasına yönlendir
+                logout();
+                return null;
+            }
+            
+            return response;
+        }
+        
+        // Dersleri yükle
+        async function loadLessons() {
+            try {
+                const response = await makeAuthenticatedRequest('/myLessons');
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    lessons = data.lessons;
+                    renderLessons();
+                } else {
+                    showMessage(data.message, 'error');
+                }
+            } catch (error) {
+                showMessage('⚠️ Dersler yüklenirken hata oluştu: ' + error.message, 'error');
+            }
+        }
+        
+        // Dersleri render et
+        function renderLessons() {
+            const container = document.getElementById('lessonsContainer');
+            
+            if (lessons.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>📚 Henüz ders oluşturmadınız</h3>
+                        <p>Yeni ders oluşturmak için "Yeni Ders" sekmesini kullanın.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const lessonsHtml = lessons.map(lesson => `
+                <div class="lesson-card">
+                    <div class="lesson-header">
+                        <div class="lesson-title">
+                            <h3>${lesson.name}</h3>
+                        </div>
+                        <span class="lesson-date">${formatDate(lesson.date)}</span>
+                    </div>
+                    <div class="lesson-actions">
+                        <button class="btn btn-sm" onclick="showQRCode('${lesson.id}', ${lesson.validity_minutes || 30})">
+                            🔗 QR Kod
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="showAttendanceList('${lesson.id}')">
+                            📊 Yoklama Listesi
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteLesson('${lesson.id}', '${lesson.name}')">
+                            🗑️ Sil
+                        </button>
+                    </div>
+                    <div class="lesson-meta">
+                        <small>
+                            Oluşturulma: ${formatDateTime(lesson.created_at)}
+                            ${lesson.validity_minutes ? ` • QR Geçerlilik: ${lesson.validity_minutes} dk` : ''}
+                        </small>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = lessonsHtml;
+        }
+        
+        // Tarih formatlama
+        function formatDate(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('tr-TR', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            });
+        }
+        
+        // Tarih ve saat formatlama
+        function formatDateTime(dateStr) {
+            const date = new Date(dateStr);
+            return date.toLocaleString('tr-TR', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        
+        // QR kod gösterme
+        function showQRCode(lessonId, validityMinutes = 30) {
+            window.location.href = `qr.html?lessonId=${lessonId}&validity=${validityMinutes}`;
+        }
+        
+        // Yoklama listesi gösterme
+        async function showAttendanceList(lessonId) {
+            const modal = document.getElementById('attendanceModal');
+            const container = document.getElementById('attendanceContainer');
+            
+            modal.classList.add('show');
+            
+            // Loading göster
+            container.innerHTML = `
+                <div class="loading-message">
+                    <div class="spinner"></div>
+                    <p>Yoklama listesi yükleniyor...</p>
+                </div>
+            `;
+            
+            try {
+                const response = await makeAuthenticatedRequest(`/attendanceList/${lessonId}`);
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('attendanceTitle').textContent = 
+                        `📊 ${data.lesson.name} - Yoklama Listesi`;
+                    
+                    if (data.attendances.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <h3>👥 Henüz yoklama yapan öğrenci yok</h3>
+                                <p>QR kod paylaşıldığında öğrenciler burada görünecek.</p>
+                            </div>
+                        `;
+                    } else {
+                        const attendanceHtml = `
+                            <div class="info-card success">
+                                <h3>📈 Yoklama Özeti</h3>
+                                <p><strong>Toplam Katılan:</strong> ${data.total} öğrenci</p>
+                                <p><strong>Ders:</strong> ${data.lesson.name}</p>
+                                <p><strong>Tarih:</strong> ${formatDate(data.lesson.date)}</p>
+                            </div>
+                            
+                            <h3>👥 Katılan Öğrenciler</h3>
+                            <div class="attendance-list">
+                                ${data.attendances.map((attendance, index) => `
+                                    <div class="attendance-item">
+                                        <div class="student-info">
+                                            <span class="attendance-number">${index + 1}</span>
+                                            <span class="student-name">${attendance.student_name}</span>
+                                        </div>
+                                        <span class="attendance-time">${formatDateTime(attendance.created_at)}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                        container.innerHTML = attendanceHtml;
+                    }
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="message error">
+                        <strong>Hata!</strong> Yoklama listesi yüklenemedi: ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Modal kapatma
+        function closeAttendanceModal() {
+            document.getElementById('attendanceModal').classList.remove('show');
+        }
+        
+        // Ders silme
+        async function deleteLesson(lessonId, lessonName) {
+            if (!confirm(`"${lessonName}" dersini silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve tüm yoklama kayıtları da silinecektir.`)) {
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await makeAuthenticatedRequest(`/deleteLesson/${lessonId}`, {
+                    method: 'DELETE'
+                });
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('✅ Ders başarıyla silindi.', 'success');
+                    loadLessons(); // Listeyi yenile
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                showMessage('⚠️ Ders silinirken hata oluştu: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Ders oluşturma formu
+        document.getElementById('lessonForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('lessonName').value.trim(),
+                date: document.getElementById('lessonDate').value,
+                validityMinutes: parseInt(document.getElementById('qrValidity').value)
+            };
+            
+            // Validasyon
+            if (!formData.name || formData.name.length < 2) {
+                showMessage('⚠️ Ders adı en az 2 karakter olmalıdır.', 'error');
+                return;
+            }
+            
+            if (!formData.date) {
+                showMessage('⚠️ Ders tarihi seçilmelidir.', 'error');
+                return;
+            }
+            
+            hideMessage();
+            showLoading(true);
+            
+            try {
+                const response = await makeAuthenticatedRequest('/createLesson', {
+                    method: 'POST',
+                    body: JSON.stringify(formData)
+                });
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('✅ Ders başarıyla oluşturuldu! QR kod sayfasına yönlendiriliyorsunuz...', 'success');
+                    
+                    // Formu temizle
+                    document.getElementById('lessonName').value = '';
+                    
+                    // QR kod sayfasına yönlendir
+                    setTimeout(() => {
+                        window.location.href = `qr.html?lessonId=${data.lessonId}&validity=${formData.validityMinutes}`;
+                    }, 1500);
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                showMessage('⚠️ Ders oluşturulurken hata oluştu: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        });
+        
+        // Modal dışına tıklandığında kapatma
+        window.onclick = function(event) {
+            const modal = document.getElementById('attendanceModal');
+            if (event.target == modal) {
+                closeAttendanceModal();
+            }
+        };
+        
+        // ESC tuşu ile modal kapatma
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeAttendanceModal();
+            }
+        });
+    </script>
+</body>
+</html> 

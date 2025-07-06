@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yoklama - QR Yoklama Sistemi</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header-content">
+            <h1>✋ Yoklama Sistemi</h1>
+            <p>QR kod ile hızlı ve güvenli yoklama</p>
+        </div>
+        
+        <div id="qrExpiredMessage" style="display: none;">
+            <div class="info-card warning">
+                <h3>⏰ QR Kod Süresi Dolmuş</h3>
+                <p><strong>Üzgünüz!</strong> Bu QR kodun geçerlilik süresi dolmuş durumda.</p>
+                <p>Lütfen öğretmeninizden yeni bir QR kod talep edin.</p>
+            </div>
+            
+            <div class="empty-state">
+                <div class="error-icon">⚠️</div>
+                <h3>Yoklama Yapılamıyor</h3>
+                <p>QR kod geçersiz hale geldi. Öğretmeniniz size yeni bir QR kod sağlayacaktır.</p>
+            </div>
+        </div>
+        
+        <div id="lessonInfo" class="info-card">
+            <h3>📚 Ders Bilgileri</h3>
+            <p><strong>Ders Adı:</strong> <span id="lessonName">Yükleniyor...</span></p>
+            <p><strong>Öğretmen:</strong> <span id="teacherName">Yükleniyor...</span></p>
+            <p><strong>Tarih:</strong> <span id="lessonDate">Yükleniyor...</span></p>
+        </div>
+        
+        <div id="attendanceForm" style="display: none;">
+            <div class="info-card success">
+                <h3>👋 Hoş Geldiniz!</h3>
+                <p><strong>Yoklama için adınızı ve soyadınızı tam olarak giriniz.</strong></p>
+                <p><small>Bu cihazdan sadece bir kez yoklama yapabilirsiniz.</small></p>
+            </div>
+            
+            <form id="studentForm">
+                <div class="form-group">
+                    <label for="studentName">Ad ve Soyad</label>
+                    <input type="text" id="studentName" name="studentName" required 
+                           placeholder="Örn: Ahmet Yılmaz" autocomplete="name">
+                </div>
+                
+                <button type="submit" class="btn btn-lg btn-full">✅ Yoklama Yap</button>
+            </form>
+        </div>
+        
+        <div id="alreadySubmitted" style="display: none;">
+            <div class="info-card warning">
+                <h3>⚠️ Zaten Yoklama Yapıldı</h3>
+                <p>Bu cihazdan bu derse zaten yoklama yapılmış. Tekrar yoklama yapamazsınız.</p>
+            </div>
+            
+            <div class="empty-state">
+                <div class="error-icon">⚠️</div>
+                <h3>Tekrar Yoklama Yapılamaz</h3>
+                <p style="color: var(--gray-600);">
+                    Bir cihazdan aynı derse sadece bir kez yoklama yapılabilir.
+                </p>
+            </div>
+            
+            <div class="info-card">
+                <h3>💡 İpucu</h3>
+                <p>Başka bir cihaz kullanarak yoklama yapabilirsiniz.</p>
+            </div>
+        </div>
+        
+        <div id="message" class="message" style="display: none;"></div>
+        
+        <div class="loading" id="loading">
+            <div class="loading-message">
+                <div class="spinner"></div>
+                <p>Yoklama kaydediliyor...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let lessonId = '';
+        let qrValidityMinutes = 30; // Varsayılan
+        let lessonCreatedAt = null;
+        
+        window.onload = async function() {
+            // URL'den lesson ID ve validity bilgilerini al
+            const urlParams = new URLSearchParams(window.location.search);
+            lessonId = urlParams.get('lessonId');
+            qrValidityMinutes = parseInt(urlParams.get('validity')) || 30;
+            
+            if (!lessonId) {
+                showError('Ders bilgisi bulunamadı! Lütfen QR kodu tekrar okutun.');
+                return;
+            }
+            
+            // Ders bilgilerini yükle
+            await loadLessonInfo();
+            
+            // QR kod süresini kontrol et
+            if (lessonCreatedAt && isQRExpired()) {
+                showQRExpired();
+                return;
+            }
+            
+            // Bu cihazdan daha önce yoklama yapılmış mı kontrol et
+            checkPreviousAttendance();
+        };
+        
+        // QR kodun süresinin dolup dolmadığını kontrol et
+        function isQRExpired() {
+            if (!lessonCreatedAt) return false;
+            
+            const createdTime = new Date(lessonCreatedAt).getTime();
+            const currentTime = new Date().getTime();
+            const validityTimeMs = qrValidityMinutes * 60 * 1000; // Dakikayı milisaniyeye çevir
+            
+            return (currentTime - createdTime) > validityTimeMs;
+        }
+        
+        // QR kod süresi dolmuş mesajını göster
+        function showQRExpired() {
+            document.getElementById('qrExpiredMessage').style.display = 'block';
+            document.getElementById('lessonInfo').style.display = 'none';
+            document.getElementById('attendanceForm').style.display = 'none';
+            document.getElementById('alreadySubmitted').style.display = 'none';
+        }
+        
+        async function loadLessonInfo() {
+            try {
+                const response = await fetch(`/lesson/${lessonId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('lessonName').textContent = data.lesson.name;
+                    document.getElementById('teacherName').textContent = data.lesson.teacher_name;
+                    const date = new Date(data.lesson.date).toLocaleDateString('tr-TR', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                    });
+                    document.getElementById('lessonDate').textContent = date;
+                    
+                    // Ders oluşturulma zamanını kaydet
+                    lessonCreatedAt = data.lesson.created_at;
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                console.error('Ders bilgileri yüklenirken hata:', error);
+                showError('Ders bilgileri yüklenemedi. Lütfen QR kodu tekrar okutun.');
+            }
+        }
+        
+        function checkPreviousAttendance() {
+            // localStorage'dan bu ders için yoklama yapılmış mı kontrol et
+            const attendanceKey = `attendance_${lessonId}`;
+            const hasAttended = localStorage.getItem(attendanceKey);
+            
+            if (hasAttended) {
+                // Daha önce yoklama yapılmış
+                document.getElementById('alreadySubmitted').style.display = 'block';
+                document.getElementById('attendanceForm').style.display = 'none';
+            } else {
+                // Henüz yoklama yapılmamış, formu göster
+                document.getElementById('attendanceForm').style.display = 'block';
+                document.getElementById('alreadySubmitted').style.display = 'none';
+                
+                // Input'a focus ver
+                setTimeout(() => {
+                    const input = document.getElementById('studentName');
+                    if (input) {
+                        input.focus();
+                    }
+                }, 500);
+            }
+        }
+        
+        // Form validasyonu
+        function validateStudentName(name) {
+            const errors = [];
+            
+            if (!name || name.trim().length < 2) {
+                errors.push('Ad ve soyad en az 2 karakter olmalıdır.');
+            }
+            
+            // Türkçe karakter kontrolü
+            if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ\s]+$/.test(name)) {
+                errors.push('Lütfen sadece harf kullanarak ad ve soyadınızı giriniz.');
+            }
+            
+            // Çok kısa isim kontrolü
+            const parts = name.trim().split(/\s+/);
+            if (parts.length < 2) {
+                errors.push('Lütfen ad ve soyadınızı tam olarak giriniz.');
+            }
+            
+            return errors;
+        }
+        
+        // Hata stili ekleme/çıkarma
+        function setFieldError(fieldId, hasError) {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                if (hasError) {
+                    field.classList.add('form-error');
+                } else {
+                    field.classList.remove('form-error');
+                }
+            }
+        }
+        
+        document.getElementById('studentForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const studentName = document.getElementById('studentName').value.trim();
+            const loading = document.getElementById('loading');
+            const messageDiv = document.getElementById('message');
+            
+            // Hata stilini temizle
+            setFieldError('studentName', false);
+            messageDiv.style.display = 'none';
+            
+            // QR kod süresini tekrar kontrol et
+            if (isQRExpired()) {
+                showQRExpired();
+                return;
+            }
+            
+            // Validasyon
+            const errors = validateStudentName(studentName);
+            if (errors.length > 0) {
+                showError(errors.join('<br>'));
+                setFieldError('studentName', true);
+                return;
+            }
+            
+            loading.classList.add('show');
+            
+            try {
+                const response = await fetch('/takeAttendance', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        lessonId: lessonId,
+                        studentName: studentName
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Başarılı yoklama - localStorage'a kaydet
+                    const attendanceKey = `attendance_${lessonId}`;
+                    localStorage.setItem(attendanceKey, 'true');
+                    localStorage.setItem(`${attendanceKey}_name`, studentName);
+                    localStorage.setItem(`${attendanceKey}_time`, new Date().toISOString());
+                    
+                    // Başarı sayfasına yönlendir
+                    window.location.href = `success.html?name=${encodeURIComponent(studentName)}&lessonId=${lessonId}`;
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                loading.classList.remove('show');
+                
+                if (error.message.includes('zaten yoklama yapıldı') || error.message.includes('already attended')) {
+                    // Sunucu tarafında da kontrol edilmiş, localStorage'a kaydet
+                    const attendanceKey = `attendance_${lessonId}`;
+                    localStorage.setItem(attendanceKey, 'true');
+                    
+                    // Sayfayı yenile
+                    window.location.reload();
+                } else if (error.message.includes('QR kod') && error.message.includes('geçersiz')) {
+                    // QR kod süresi dolmuş
+                    showQRExpired();
+                } else {
+                    showError(error.message);
+                    setFieldError('studentName', true);
+                }
+            }
+        });
+        
+        function showError(message) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = 'message error';
+            messageDiv.style.display = 'block';
+            messageDiv.innerHTML = `<strong>Hata!</strong> ${message}`;
+            
+            // Otomatik gizleme
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 6000);
+        }
+        
+        // Input field temizleme (hata durumunda)
+        document.getElementById('studentName').addEventListener('input', function() {
+            setFieldError('studentName', false);
+            document.getElementById('message').style.display = 'none';
+        });
+        
+        // Enter tuşu ile form gönderme
+        document.getElementById('studentName').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('studentForm').dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html> 

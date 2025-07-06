@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Yoklama Sistemi - Öğretmen Girişi</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="header-content">
+            <h1>📚 QR Yoklama Sistemi</h1>
+            <p>Güvenli QR kod ile yoklama sistemi. Öğretmenler için giriş yapın veya hesap oluşturun.</p>
+        </div>
+        
+        <!-- Giriş ve Kayıt Sekmeleri -->
+        <div class="tabs">
+            <button class="tab-button active" onclick="showTab('login')">🔐 Giriş Yap</button>
+            <button class="tab-button" onclick="showTab('register')">📝 Kayıt Ol</button>
+        </div>
+        
+        <!-- Giriş Formu -->
+        <div id="loginTab" class="tab-content active">
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="loginEmail">E-posta Adresi</label>
+                    <input type="email" id="loginEmail" name="email" required 
+                           placeholder="ornek@email.com" autocomplete="email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="loginPassword">Şifre</label>
+                    <input type="password" id="loginPassword" name="password" required 
+                           placeholder="Şifrenizi girin" autocomplete="current-password">
+                </div>
+                
+                <button type="submit" class="btn btn-full">🔐 Giriş Yap</button>
+            </form>
+        </div>
+        
+        <!-- Kayıt Formu -->
+        <div id="registerTab" class="tab-content">
+            <form id="registerForm">
+                <div class="form-group">
+                    <label for="registerName">Ad ve Soyad</label>
+                    <input type="text" id="registerName" name="name" required 
+                           placeholder="Adınızı ve soyadınızı girin" autocomplete="name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerEmail">E-posta Adresi</label>
+                    <input type="email" id="registerEmail" name="email" required 
+                           placeholder="ornek@email.com" autocomplete="email">
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerPassword">Şifre</label>
+                    <input type="password" id="registerPassword" name="password" required 
+                           placeholder="En az 6 karakter" minlength="6" autocomplete="new-password">
+                </div>
+                
+                <div class="form-group">
+                    <label for="registerPasswordConfirm">Şifre Tekrar</label>
+                    <input type="password" id="registerPasswordConfirm" name="passwordConfirm" required 
+                           placeholder="Şifrenizi tekrar girin" autocomplete="new-password">
+                </div>
+                
+                <button type="submit" class="btn btn-full">📝 Kayıt Ol</button>
+            </form>
+        </div>
+        
+        <div id="message" class="message" style="display: none;"></div>
+        
+        <div class="loading" id="loading">
+            <div class="loading-message">
+                <div class="spinner"></div>
+                <p>İşlem yapılıyor...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sekme değiştirme
+        function showTab(tabName) {
+            // Tüm sekmeleri gizle
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Tüm sekme butonlarını pasif yap
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Seçili sekmeyi göster
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            event.target.classList.add('active');
+            
+            // Mesajları temizle
+            hideMessage();
+        }
+        
+        // Mesaj gösterme
+        function showMessage(message, type = 'success') {
+            const messageDiv = document.getElementById('message');
+            messageDiv.className = `message ${type}`;
+            messageDiv.innerHTML = message;
+            messageDiv.style.display = 'block';
+            
+            // Otomatik gizleme (hata mesajları için)
+            if (type === 'error') {
+                setTimeout(() => {
+                    hideMessage();
+                }, 5000);
+            }
+        }
+        
+        // Mesaj gizleme
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+        
+        // Loading gösterme/gizleme
+        function showLoading(show = true) {
+            const loading = document.getElementById('loading');
+            if (show) {
+                loading.classList.add('show');
+            } else {
+                loading.classList.remove('show');
+            }
+        }
+        
+        // Form validasyonu
+        function validateForm(formData, isRegister = false) {
+            const errors = [];
+            
+            if (isRegister) {
+                if (!formData.name || formData.name.trim().length < 2) {
+                    errors.push('Ad ve soyad en az 2 karakter olmalıdır.');
+                }
+                
+                if (formData.password !== formData.passwordConfirm) {
+                    errors.push('Şifreler eşleşmiyor.');
+                }
+            }
+            
+            // E-posta kontrolü
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(formData.email)) {
+                errors.push('Geçerli bir e-posta adresi girin.');
+            }
+            
+            if (formData.password.length < 6) {
+                errors.push('Şifre en az 6 karakter olmalıdır.');
+            }
+            
+            return errors;
+        }
+        
+        // Input field'lara hata stili ekleme/çıkarma
+        function setFieldError(fieldId, hasError) {
+            const field = document.getElementById(fieldId);
+            if (hasError) {
+                field.classList.add('form-error');
+            } else {
+                field.classList.remove('form-error');
+            }
+        }
+        
+        // Giriş formu
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                email: document.getElementById('loginEmail').value.trim(),
+                password: document.getElementById('loginPassword').value
+            };
+            
+            // Hata stillerini temizle
+            setFieldError('loginEmail', false);
+            setFieldError('loginPassword', false);
+            
+            hideMessage();
+            
+            // Validasyon
+            const errors = validateForm(formData);
+            if (errors.length > 0) {
+                showMessage(errors.join('<br>'), 'error');
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Token ve kullanıcı bilgilerini localStorage'a kaydet
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    
+                    showMessage('✅ Giriş başarılı! Yönlendiriliyorsunuz...', 'success');
+                    
+                    setTimeout(() => {
+                        window.location.href = 'teacher.html';
+                    }, 1000);
+                } else {
+                    showMessage(data.message, 'error');
+                    
+                    // Hatalı alanlara stil ekle
+                    if (data.message.includes('posta') || data.message.includes('şifre')) {
+                        setFieldError('loginEmail', true);
+                        setFieldError('loginPassword', true);
+                    }
+                }
+            } catch (error) {
+                showMessage('⚠️ Giriş işlemi sırasında hata oluştu. Lütfen tekrar deneyin.', 'error');
+                console.error('Login error:', error);
+            } finally {
+                showLoading(false);
+            }
+        });
+        
+        // Kayıt formu
+        document.getElementById('registerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('registerName').value.trim(),
+                email: document.getElementById('registerEmail').value.trim(),
+                password: document.getElementById('registerPassword').value,
+                passwordConfirm: document.getElementById('registerPasswordConfirm').value
+            };
+            
+            // Hata stillerini temizle
+            setFieldError('registerName', false);
+            setFieldError('registerEmail', false);
+            setFieldError('registerPassword', false);
+            setFieldError('registerPasswordConfirm', false);
+            
+            hideMessage();
+            
+            // Validasyon
+            const errors = validateForm(formData, true);
+            if (errors.length > 0) {
+                showMessage(errors.join('<br>'), 'error');
+                
+                // Hatalı alanlara stil ekle
+                if (errors.some(e => e.includes('Ad ve soyad'))) {
+                    setFieldError('registerName', true);
+                }
+                if (errors.some(e => e.includes('e-posta'))) {
+                    setFieldError('registerEmail', true);
+                }
+                if (errors.some(e => e.includes('Şifre'))) {
+                    setFieldError('registerPassword', true);
+                    setFieldError('registerPasswordConfirm', true);
+                }
+                
+                return;
+            }
+            
+            showLoading(true);
+            
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: formData.name,
+                        email: formData.email,
+                        password: formData.password
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Token ve kullanıcı bilgilerini localStorage'a kaydet
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    
+                    showMessage('✅ Kayıt başarılı! Yönlendiriliyorsunuz...', 'success');
+                    
+                    setTimeout(() => {
+                        window.location.href = 'teacher.html';
+                    }, 1000);
+                } else {
+                    showMessage(data.message, 'error');
+                    
+                    // Hatalı alanlara stil ekle
+                    if (data.message.includes('e-posta')) {
+                        setFieldError('registerEmail', true);
+                    }
+                }
+            } catch (error) {
+                showMessage('⚠️ Kayıt işlemi sırasında hata oluştu. Lütfen tekrar deneyin.', 'error');
+                console.error('Register error:', error);
+            } finally {
+                showLoading(false);
+            }
+        });
+        
+        // Sayfa yüklendiğinde token kontrolü
+        window.onload = function() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                // Zaten giriş yapılmış, teacher sayfasına yönlendir
+                window.location.href = 'teacher.html';
+            }
+        };
+    </script>
+</body>
+</html> 

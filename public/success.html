@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yoklama Başarılı - QR Yoklama Sistemi</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <div class="success-icon">✅</div>
+        
+        <div class="header-content">
+            <h1>Yoklama Başarılı!</h1>
+            <p>Yoklamanız başarıyla kaydedildi</p>
+        </div>
+        
+        <div class="info-card success">
+            <h3>📋 Yoklama Bilgileri</h3>
+            <div style="display: grid; gap: var(--space-3);">
+                <div>
+                    <p><strong>Öğrenci:</strong> <span id="studentName">-</span></p>
+                    <p><strong>Ders:</strong> <span id="lessonName">Yükleniyor...</span></p>
+                </div>
+                <div>
+                    <p><strong>Tarih:</strong> <span id="lessonDate">-</span></p>
+                    <p><strong>Yoklama Zamanı:</strong> <span id="attendanceTime">-</span></p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-card">
+            <h3>🎉 Tebrikler!</h3>
+            <p><strong>Yoklamanız başarıyla kaydedildi.</strong> Bu cihazdan bu derse tekrar yoklama yapamazsınız.</p>
+            <p>Yoklama sistemi kullandığınız için teşekkür ederiz.</p>
+        </div>
+        
+        <div class="info-card warning">
+            <h3>⚠️ Önemli Bilgi</h3>
+            <p><strong>Tekrar Yoklama:</strong> Bu cihazdan aynı derse tekrar yoklama yapamazsınız.</p>
+            <p><strong>Başka Cihaz:</strong> Gerekirse başka bir cihaz kullanarak yoklama yapabilirsiniz.</p>
+        </div>
+        
+        <div style="display: flex; gap: var(--space-4); margin-top: var(--space-8); flex-wrap: wrap;">
+            <button class="btn btn-secondary btn-full" onclick="window.close()" style="flex: 1;">
+                🔒 Pencereyi Kapat
+            </button>
+            <button class="btn btn-outline btn-full" onclick="printAttendance()" style="flex: 1;">
+                🖨️ Yazdır
+            </button>
+        </div>
+        
+        <!-- Konfeti container -->
+        <div id="confetti-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1000;"></div>
+    </div>
+
+    <script>
+        window.onload = async function() {
+            // URL parametrelerini al
+            const urlParams = new URLSearchParams(window.location.search);
+            const studentName = urlParams.get('name');
+            const lessonId = urlParams.get('lessonId');
+            
+            if (studentName) {
+                document.getElementById('studentName').textContent = decodeURIComponent(studentName);
+            }
+            
+            // Yoklama zamanını göster
+            const now = new Date();
+            document.getElementById('attendanceTime').textContent = now.toLocaleString('tr-TR', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            // Ders bilgilerini yükle
+            if (lessonId) {
+                await loadLessonInfo(lessonId);
+            }
+            
+            // Konfeti efekti
+            setTimeout(showConfetti, 800);
+            
+            // 5 saniye sonra otomatik olarak pencereyi kapatma seçeneği
+            setTimeout(() => {
+                showAutoCloseOption();
+            }, 5000);
+        };
+        
+        async function loadLessonInfo(lessonId) {
+            try {
+                const response = await fetch(`/lesson/${lessonId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('lessonName').textContent = data.lesson.name;
+                    const date = new Date(data.lesson.date).toLocaleDateString('tr-TR', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                    });
+                    document.getElementById('lessonDate').textContent = date;
+                }
+            } catch (error) {
+                console.error('Ders bilgileri yüklenirken hata:', error);
+                document.getElementById('lessonName').textContent = 'Bilinmiyor';
+                document.getElementById('lessonDate').textContent = 'Bilinmiyor';
+            }
+        }
+        
+        function showConfetti() {
+            const container = document.getElementById('confetti-container');
+            const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+            
+            // 50 konfeti parçası oluştur
+            for (let i = 0; i < 50; i++) {
+                setTimeout(() => {
+                    createConfettiPiece(container, colors);
+                }, i * 50);
+            }
+        }
+        
+        function createConfettiPiece(container, colors) {
+            const confetti = document.createElement('div');
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            const size = Math.random() * 8 + 4; // 4-12px
+            const leftPosition = Math.random() * 100;
+            const animationDuration = Math.random() * 2 + 2; // 2-4 saniye
+            
+            confetti.style.cssText = `
+                position: absolute;
+                left: ${leftPosition}%;
+                top: -10px;
+                width: ${size}px;
+                height: ${size}px;
+                background-color: ${randomColor};
+                border-radius: ${Math.random() > 0.5 ? '50%' : '0'};
+                animation: confettiFall ${animationDuration}s linear forwards;
+                opacity: 0.8;
+            `;
+            
+            container.appendChild(confetti);
+            
+            // Animasyon bittikten sonra elementi kaldır
+            setTimeout(() => {
+                if (confetti.parentNode) {
+                    confetti.parentNode.removeChild(confetti);
+                }
+            }, animationDuration * 1000);
+        }
+        
+        function showAutoCloseOption() {
+            // Sayfanın alt kısmına otomatik kapanma bildirimi ekle
+            const notification = document.createElement('div');
+            notification.className = 'info-card';
+            notification.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                max-width: 400px;
+                animation: slideUp 0.3s ease-out;
+                z-index: 1001;
+            `;
+            notification.innerHTML = `
+                <h3>💡 İpucu</h3>
+                <p>Bu pencereyi kapatmak için üstteki "Pencereyi Kapat" butonunu kullanabilirsiniz.</p>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // 8 saniye sonra bildirimi kaldır
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.style.animation = 'slideDown 0.3s ease-out forwards';
+                    setTimeout(() => {
+                        notification.parentNode.removeChild(notification);
+                    }, 300);
+                }
+            }, 8000);
+        }
+        
+        function printAttendance() {
+            // Print sayfası için stilleri ayarla
+            const printStyle = document.createElement('style');
+            printStyle.textContent = `
+                @media print {
+                    body * {
+                        visibility: hidden;
+                    }
+                    .container, .container * {
+                        visibility: visible;
+                    }
+                    .container {
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        width: 100%;
+                    }
+                    button {
+                        display: none !important;
+                    }
+                    #confetti-container {
+                        display: none !important;
+                    }
+                }
+            `;
+            document.head.appendChild(printStyle);
+            
+            window.print();
+            
+            // Print işlemi bittikten sonra stili kaldır
+            setTimeout(() => {
+                document.head.removeChild(printStyle);
+            }, 1000);
+        }
+        
+        // CSS animasyonları dinamik olarak ekle
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes confettiFall {
+                0% {
+                    transform: translateY(-10px) rotate(0deg);
+                    opacity: 1;
+                }
+                100% {
+                    transform: translateY(100vh) rotate(360deg);
+                    opacity: 0;
+                }
+            }
+            
+            @keyframes slideUp {
+                0% {
+                    transform: translateX(-50%) translateY(100%);
+                    opacity: 0;
+                }
+                100% {
+                    transform: translateX(-50%) translateY(0);
+                    opacity: 1;
+                }
+            }
+            
+            @keyframes slideDown {
+                0% {
+                    transform: translateX(-50%) translateY(0);
+                    opacity: 1;
+                }
+                100% {
+                    transform: translateX(-50%) translateY(100%);
+                    opacity: 0;
+                }
+            }
+            
+            .success-icon {
+                animation: successPulse 1.5s ease-in-out;
+            }
+            
+            @keyframes successPulse {
+                0%, 100% {
+                    transform: scale(1);
+                }
+                50% {
+                    transform: scale(1.1);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Klavye kısayolları
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' || e.key === 'Enter') {
+                window.close();
+            } else if (e.ctrlKey && e.key === 'p') {
+                e.preventDefault();
+                printAttendance();
+            }
+        });
+        
+        // Sayfaya tıklandığında konfeti efekti (opsiyonel)
+        let clickCount = 0;
+        document.addEventListener('click', function(e) {
+            clickCount++;
+            if (clickCount <= 3) { // İlk 3 tıklamada konfeti göster
+                showConfetti();
+            }
+        });
+    </script>
+</body>
+</html> 
