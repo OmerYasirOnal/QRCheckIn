@@ -47,6 +47,11 @@ function initDatabase() {
             date TEXT NOT NULL,
             validity_minutes INTEGER DEFAULT 30,
             is_invalidated INTEGER DEFAULT 0,
+            location_enabled INTEGER DEFAULT 0,
+            center_latitude REAL,
+            center_longitude REAL,
+            radius_meters INTEGER DEFAULT 100,
+            location_name TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (teacher_id) REFERENCES teachers (id)
         )`);
@@ -57,25 +62,79 @@ function initDatabase() {
             lesson_id TEXT NOT NULL,
             student_name TEXT NOT NULL,
             ip_address TEXT NOT NULL,
+            latitude REAL,
+            longitude REAL,
+            location_accuracy REAL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (lesson_id) REFERENCES lessons (id)
         )`);
 
-        // Add is_invalidated column to existing lessons table if it doesn't exist
-        db.run(`PRAGMA table_info(lessons)`, (err, rows) => {
+        // Konum doğrulama logları tablosu
+        db.run(`CREATE TABLE IF NOT EXISTS location_validation_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lesson_id TEXT NOT NULL,
+            student_name TEXT,
+            ip_address TEXT NOT NULL,
+            latitude REAL,
+            longitude REAL,
+            accuracy REAL,
+            distance_meters REAL,
+            allowed_radius_meters INTEGER,
+            validation_result TEXT NOT NULL,
+            validation_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (lesson_id) REFERENCES lessons (id)
+        )`);
+
+        // Add missing columns to existing tables
+        db.all(`PRAGMA table_info(lessons)`, (err, columns) => {
             if (!err) {
-                db.all(`PRAGMA table_info(lessons)`, (err, columns) => {
-                    if (!err) {
-                        const hasInvalidatedColumn = columns.some(col => col.name === 'is_invalidated');
-                        if (!hasInvalidatedColumn) {
-                            db.run(`ALTER TABLE lessons ADD COLUMN is_invalidated INTEGER DEFAULT 0`, (err) => {
-                                if (err) {
-                                    console.error('is_invalidated kolonu eklenirken hata:', err.message);
-                                } else {
-                                    console.log('is_invalidated kolonu başarıyla eklendi.');
-                                }
-                            });
-                        }
+                const columnNames = columns.map(col => col.name);
+                
+                // Add location columns to lessons table
+                const locationColumns = [
+                    { name: 'is_invalidated', type: 'INTEGER DEFAULT 0' },
+                    { name: 'location_enabled', type: 'INTEGER DEFAULT 0' },
+                    { name: 'center_latitude', type: 'REAL' },
+                    { name: 'center_longitude', type: 'REAL' },
+                    { name: 'radius_meters', type: 'INTEGER DEFAULT 100' },
+                    { name: 'location_name', type: 'TEXT' }
+                ];
+                
+                locationColumns.forEach(col => {
+                    if (!columnNames.includes(col.name)) {
+                        db.run(`ALTER TABLE lessons ADD COLUMN ${col.name} ${col.type}`, (err) => {
+                            if (err) {
+                                console.error(`${col.name} kolonu eklenirken hata:`, err.message);
+                            } else {
+                                console.log(`${col.name} kolonu başarıyla eklendi.`);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+
+        // Add location columns to attendances table
+        db.all(`PRAGMA table_info(attendances)`, (err, columns) => {
+            if (!err) {
+                const columnNames = columns.map(col => col.name);
+                
+                const locationColumns = [
+                    { name: 'latitude', type: 'REAL' },
+                    { name: 'longitude', type: 'REAL' },
+                    { name: 'location_accuracy', type: 'REAL' }
+                ];
+                
+                locationColumns.forEach(col => {
+                    if (!columnNames.includes(col.name)) {
+                        db.run(`ALTER TABLE attendances ADD COLUMN ${col.name} ${col.type}`, (err) => {
+                            if (err) {
+                                console.error(`${col.name} kolonu eklenirken hata:`, err.message);
+                            } else {
+                                console.log(`${col.name} kolonu başarıyla eklendi.`);
+                            }
+                        });
                     }
                 });
             }
@@ -128,6 +187,83 @@ function hashPassword(password) {
 
 function validatePassword(password, hash) {
     return bcrypt.compareSync(password, hash);
+}
+
+// Haversine formula - iki koordinat arasındaki mesafeyi metre cinsinden hesaplar
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // Dünya'nın yarıçapı (metre)
+    const φ1 = lat1 * Math.PI / 180; // φ, λ radyan cinsinden
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    const distance = R * c; // metre cinsinden mesafe
+    return distance;
+}
+
+// Konum doğrulaması
+function validateLocation(studentLat, studentLon, centerLat, centerLon, radiusMeters, accuracy) {
+    // Konum bilgileri eksikse
+    if (!studentLat || !studentLon || !centerLat || !centerLon) {
+        return { valid: false, reason: 'Konum bilgileri eksik.' };
+    }
+
+    // GPS doğruluğu çok düşükse (100 metre'den fazla hata payı)
+    if (accuracy && accuracy > 100) {
+        return { valid: false, reason: 'GPS sinyali yeterince güçlü değil. Lütfen açık alanda tekrar deneyin.' };
+    }
+
+    // Mesafeyi hesapla
+    const distance = calculateDistance(studentLat, studentLon, centerLat, centerLon);
+    
+    // İzin verilen yarıçapın dışındaysa
+    if (distance > radiusMeters) {
+        return { 
+            valid: false, 
+            reason: `Ders konumundan ${Math.round(distance)} metre uzaktasınız. İzin verilen mesafe: ${radiusMeters} metre.`,
+            distance: Math.round(distance)
+        };
+    }
+
+    return { 
+        valid: true, 
+        distance: Math.round(distance) 
+    };
+}
+
+// Konum doğrulama sonucunu logla
+function logLocationValidation(lessonId, studentName, ipAddress, latitude, longitude, accuracy, distance, allowedRadius, result, message) {
+    const insertQuery = `
+        INSERT INTO location_validation_logs (
+            lesson_id, student_name, ip_address, latitude, longitude, 
+            accuracy, distance_meters, allowed_radius_meters, 
+            validation_result, validation_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    const values = [
+        lessonId,
+        studentName || null,
+        ipAddress,
+        latitude || null,
+        longitude || null,
+        accuracy || null,
+        distance || null,
+        allowedRadius || null,
+        result, // 'success', 'location_denied', 'location_outside_range', 'weak_gps', 'missing_location'
+        message || null
+    ];
+    
+    db.run(insertQuery, values, function(err) {
+        if (err) {
+            console.error('Konum doğrulama logu kaydedilirken hata:', err.message);
+        }
+    });
 }
 
 // Ana sayfa
@@ -265,7 +401,15 @@ app.post('/login', (req, res) => {
 
 // Ders oluşturma endpoint'i (Authentication required)
 app.post('/createLesson', authenticateToken, (req, res) => {
-    const { name, date } = req.body;
+    const { 
+        name, 
+        date, 
+        locationEnabled, 
+        centerLatitude, 
+        centerLongitude, 
+        radiusMeters, 
+        locationName 
+    } = req.body;
     
     if (!name || !date) {
         return res.status(400).json({ 
@@ -274,26 +418,62 @@ app.post('/createLesson', authenticateToken, (req, res) => {
         });
     }
 
-    const lessonId = uuidv4();
-    
-    db.run('INSERT INTO lessons (id, teacher_id, name, date, validity_minutes) VALUES (?, ?, ?, ?, ?)', 
-        [lessonId, req.user.id, name, date, 30], 
-        function(err) {
-            if (err) {
-                console.error('Ders oluşturma hatası:', err.message);
-                return res.status(500).json({ 
-                    success: false, 
-                    message: 'Ders oluşturulamadı.' 
-                });
-            }
-            
-            res.json({ 
-                success: true, 
-                lessonId: lessonId,
-                message: 'Ders başarıyla oluşturuldu.'
+    // Konum kontrolü
+    if (locationEnabled) {
+        if (!centerLatitude || !centerLongitude || !radiusMeters) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Konum kısıtlaması aktifken koordinat ve yarıçap bilgileri gereklidir.' 
             });
         }
-    );
+
+        if (radiusMeters < 10 || radiusMeters > 10000) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Yarıçap 10 ile 10000 metre arasında olmalıdır.' 
+            });
+        }
+    }
+
+    const lessonId = uuidv4();
+    
+    const query = `
+        INSERT INTO lessons (
+            id, teacher_id, name, date, validity_minutes, 
+            location_enabled, center_latitude, center_longitude, 
+            radius_meters, location_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    const values = [
+        lessonId, 
+        req.user.id, 
+        name, 
+        date, 
+        30,
+        locationEnabled ? 1 : 0,
+        locationEnabled ? centerLatitude : null,
+        locationEnabled ? centerLongitude : null,
+        locationEnabled ? radiusMeters : null,
+        locationEnabled ? locationName : null
+    ];
+    
+    db.run(query, values, function(err) {
+        if (err) {
+            console.error('Ders oluşturma hatası:', err.message);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'Ders oluşturulamadı.' 
+            });
+        }
+        
+        res.json({ 
+            success: true, 
+            lessonId: lessonId,
+            message: 'Ders başarıyla oluşturuldu.',
+            locationEnabled: locationEnabled || false
+        });
+    });
 });
 
 // Öğretmenin derslerini listeleme endpoint'i (Authentication required)
@@ -451,7 +631,13 @@ app.get('/lesson/:lessonId', (req, res) => {
 
 // Yoklama alma endpoint'i (Public - Öğrenciler için)
 app.post('/takeAttendance', (req, res) => {
-    const { lessonId, studentName } = req.body;
+    const { 
+        lessonId, 
+        studentName, 
+        latitude, 
+        longitude, 
+        accuracy 
+    } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || '127.0.0.1';
     
     if (!lessonId || !studentName) {
@@ -486,6 +672,82 @@ app.post('/takeAttendance', (req, res) => {
             });
         }
 
+        // Konum kontrolü (eğer aktifse)
+        if (lesson.location_enabled) {
+            if (!latitude || !longitude) {
+                // Konum bilgisi eksik - logla
+                logLocationValidation(
+                    lessonId, 
+                    studentName, 
+                    clientIP, 
+                    null, 
+                    null, 
+                    null, 
+                    null, 
+                    lesson.radius_meters, 
+                    'missing_location', 
+                    'Konum bilgisi sağlanmadı'
+                );
+                
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Bu ders için konum bilgisi gereklidir. Lütfen konum erişimine izin verin.' 
+                });
+            }
+
+            const locationCheck = validateLocation(
+                latitude, 
+                longitude, 
+                lesson.center_latitude, 
+                lesson.center_longitude, 
+                lesson.radius_meters,
+                accuracy
+            );
+
+            if (!locationCheck.valid) {
+                // Konum doğrulama başarısız - logla
+                let logResult = 'location_outside_range';
+                if (accuracy && accuracy > 100) {
+                    logResult = 'weak_gps';
+                }
+                
+                logLocationValidation(
+                    lessonId, 
+                    studentName, 
+                    clientIP, 
+                    latitude, 
+                    longitude, 
+                    accuracy, 
+                    locationCheck.distance, 
+                    lesson.radius_meters, 
+                    logResult, 
+                    locationCheck.reason
+                );
+                
+                return res.status(403).json({ 
+                    success: false, 
+                    message: locationCheck.reason,
+                    distance: locationCheck.distance || null,
+                    allowedRadius: lesson.radius_meters,
+                    locationName: lesson.location_name || 'Ders Konumu'
+                });
+            }
+            
+            // Konum doğrulama başarılı - logla
+            logLocationValidation(
+                lessonId, 
+                studentName, 
+                clientIP, 
+                latitude, 
+                longitude, 
+                accuracy, 
+                locationCheck.distance, 
+                lesson.radius_meters, 
+                'success', 
+                'Konum doğrulandı'
+            );
+        }
+
         // Aynı IP adresinden bu derse daha önce yoklama yapılmış mı kontrol et
         db.get('SELECT * FROM attendances WHERE lesson_id = ? AND ip_address = ?', 
             [lessonId, clientIP], 
@@ -506,23 +768,39 @@ app.post('/takeAttendance', (req, res) => {
                 }
                 
                 // Yeni yoklama kaydı oluştur
-                db.run('INSERT INTO attendances (lesson_id, student_name, ip_address) VALUES (?, ?, ?)', 
-                    [lessonId, studentName.trim(), clientIP], 
-                    function(err) {
-                        if (err) {
-                            console.error('Yoklama kaydetme hatası:', err.message);
-                            return res.status(500).json({ 
-                                success: false, 
-                                message: 'Yoklama kaydedilemedi.' 
-                            });
-                        }
-                        
-                        res.json({ 
-                            success: true, 
-                            message: 'Yoklama başarıyla kaydedildi!' 
+                const insertQuery = `
+                    INSERT INTO attendances (
+                        lesson_id, student_name, ip_address, 
+                        latitude, longitude, location_accuracy
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                `;
+                
+                const insertValues = [
+                    lessonId, 
+                    studentName.trim(), 
+                    clientIP,
+                    latitude || null,
+                    longitude || null,
+                    accuracy || null
+                ];
+                
+                db.run(insertQuery, insertValues, function(err) {
+                    if (err) {
+                        console.error('Yoklama kaydetme hatası:', err.message);
+                        return res.status(500).json({ 
+                            success: false, 
+                            message: 'Yoklama kaydedilemedi.' 
                         });
                     }
-                );
+                    
+                    res.json({ 
+                        success: true, 
+                        message: 'Yoklama başarıyla kaydedildi!',
+                        locationEnabled: lesson.location_enabled ? true : false,
+                        distance: lesson.location_enabled && latitude && longitude ? 
+                            Math.round(calculateDistance(latitude, longitude, lesson.center_latitude, lesson.center_longitude)) : null
+                    });
+                });
             }
         );
     });
@@ -554,7 +832,10 @@ app.get('/attendanceList/:lessonId', authenticateToken, (req, res) => {
             const query = `
                 SELECT 
                     a.student_name,
-                    a.created_at
+                    a.created_at,
+                    a.latitude,
+                    a.longitude,
+                    a.location_accuracy
                 FROM attendances a
                 WHERE a.lesson_id = ?
                 ORDER BY a.created_at ASC

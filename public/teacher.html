@@ -59,6 +59,60 @@
                         Ders tarihi otomatik olarak bugünün tarihi olarak ayarlanır.
                     </small>
                 </div>
+
+                <!-- Konum Kısıtlaması Bölümü -->
+                <div class="info-card warning" style="margin: var(--space-4) 0;">
+                    <h3>📍 Konum Kısıtlaması (İsteğe Bağlı)</h3>
+                    <p>Öğrencilerin sadece belirli bir konumdan yoklama yapabilmesini sağlar.</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="locationEnabled" name="locationEnabled">
+                        <span class="checkmark"></span>
+                        📍 Konum kısıtlaması etkinleştir
+                    </label>
+                    <small style="color: var(--gray-600); margin-top: var(--space-1); display: block;">
+                        Etkinleştirildiğinde öğrenciler sadece belirlenen alan içinden yoklama yapabilir.
+                    </small>
+                </div>
+
+                <div id="locationSettings" style="display: none;">
+                    <div class="form-group">
+                        <label for="locationName">Konum Adı</label>
+                        <input type="text" id="locationName" name="locationName" 
+                               placeholder="Örn: A101 Sınıfı, Konferans Salonu" autocomplete="off">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="radiusMeters">İzin Verilen Yarıçap (metre)</label>
+                        <select id="radiusMeters" name="radiusMeters">
+                            <option value="25">25 metre (küçük sınıf)</option>
+                            <option value="50" selected>50 metre (orta sınıf)</option>
+                            <option value="100">100 metre (büyük sınıf/salon)</option>
+                            <option value="200">200 metre (kampüs alanı)</option>
+                            <option value="500">500 metre (büyük alan)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <button type="button" id="getCurrentLocation" class="btn btn-outline">
+                            📍 Mevcut Konumu Al
+                        </button>
+                        <small style="color: var(--gray-600); margin-top: var(--space-1); display: block;">
+                            Şu anki konumunuzu ders merkezi olarak ayarlar.
+                        </small>
+                    </div>
+
+                    <div id="locationPreview" style="display: none;">
+                        <div class="info-card success">
+                            <h4>📍 Seçilen Konum</h4>
+                            <p><strong>Enlem:</strong> <span id="previewLat">-</span></p>
+                            <p><strong>Boylam:</strong> <span id="previewLon">-</span></p>
+                            <p><strong>Doğruluk:</strong> <span id="previewAccuracy">-</span> metre</p>
+                        </div>
+                    </div>
+                </div>
                 
                 <button type="submit" class="btn btn-lg btn-full">🎯 Ders Oluştur ve QR Kod Üret</button>
             </form>
@@ -94,6 +148,22 @@
         let currentUser = null;
         let currentToken = null;
         let lessons = [];
+
+        // Mesafe hesaplama fonksiyonu (Haversine formula)
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // Dünya'nın yarıçapı (metre)
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c; // metre cinsinden mesafe
+        }
         
         // Sayfa yüklendiğinde
         window.onload = function() {
@@ -334,15 +404,29 @@
                             
                             <h3>👥 Katılan Öğrenciler</h3>
                             <div class="attendance-list">
-                                ${data.attendances.map((attendance, index) => `
-                                    <div class="attendance-item">
-                                        <div class="student-info">
-                                            <span class="attendance-number">${index + 1}</span>
-                                            <span class="student-name">${attendance.student_name}</span>
+                                ${data.attendances.map((attendance, index) => {
+                                    const hasLocation = attendance.latitude && attendance.longitude;
+                                    const distance = hasLocation && data.lesson.location_enabled && data.lesson.center_latitude && data.lesson.center_longitude ? 
+                                        Math.round(calculateDistance(attendance.latitude, attendance.longitude, data.lesson.center_latitude, data.lesson.center_longitude)) : null;
+                                    
+                                    return `
+                                        <div class="attendance-item">
+                                            <div class="student-info">
+                                                <span class="attendance-number">${index + 1}</span>
+                                                <div class="student-details">
+                                                    <span class="student-name">${attendance.student_name}</span>
+                                                    ${hasLocation ? `
+                                                        <small class="location-info">
+                                                            📍 ${distance !== null ? `${distance}m mesafede` : 'Konum kaydedildi'}
+                                                            ${attendance.location_accuracy ? ` (±${Math.round(attendance.location_accuracy)}m)` : ''}
+                                                        </small>
+                                                    ` : ''}
+                                                </div>
+                                            </div>
+                                            <span class="attendance-time">${formatDateTime(attendance.created_at)}</span>
                                         </div>
-                                        <span class="attendance-time">${formatDateTime(attendance.created_at)}</span>
-                                    </div>
-                                `).join('')}
+                                    `;
+                                }).join('')}
                             </div>
                         `;
                         container.innerHTML = attendanceHtml;
@@ -393,14 +477,105 @@
             }
         }
         
+        // Konum değişkenlerini başlat
+        let currentLocation = null;
+
+        // Konum kısıtlaması checkbox kontrolü
+        document.getElementById('locationEnabled').addEventListener('change', function() {
+            const locationSettings = document.getElementById('locationSettings');
+            if (this.checked) {
+                locationSettings.style.display = 'block';
+            } else {
+                locationSettings.style.display = 'none';
+                currentLocation = null;
+                document.getElementById('locationPreview').style.display = 'none';
+            }
+        });
+
+        // Mevcut konumu al butonu
+        document.getElementById('getCurrentLocation').addEventListener('click', async function() {
+            if (!navigator.geolocation) {
+                showMessage('⚠️ Tarayıcınız konum servislerini desteklemiyor.', 'error');
+                return;
+            }
+
+            const button = this;
+            const originalText = button.innerHTML;
+            button.innerHTML = '🌍 Konum alınıyor...';
+            button.disabled = true;
+
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    currentLocation = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy
+                    };
+
+                    // Konum önizlemesini göster
+                    document.getElementById('previewLat').textContent = currentLocation.latitude.toFixed(6);
+                    document.getElementById('previewLon').textContent = currentLocation.longitude.toFixed(6);
+                    document.getElementById('previewAccuracy').textContent = Math.round(currentLocation.accuracy);
+                    document.getElementById('locationPreview').style.display = 'block';
+
+                    showMessage('✅ Konum başarıyla alındı!', 'success');
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                },
+                function(error) {
+                    let errorMessage = '';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage = 'Konum erişimi reddedildi. Lütfen tarayıcı ayarlarından izin verin.';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage = 'Konum bilgisi alınamadı.';
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage = 'Konum alma işlemi zaman aşımına uğradı.';
+                            break;
+                        default:
+                            errorMessage = 'Konum alınırken bilinmeyen bir hata oluştu.';
+                            break;
+                    }
+                    showMessage('⚠️ ' + errorMessage, 'error');
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                },
+                options
+            );
+        });
+
         // Ders oluşturma formu
         document.getElementById('lessonForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
+            const locationEnabled = document.getElementById('locationEnabled').checked;
+            
             const formData = {
                 name: document.getElementById('lessonName').value.trim(),
-                date: document.getElementById('lessonDate').value
+                date: document.getElementById('lessonDate').value,
+                locationEnabled: locationEnabled
             };
+
+            // Konum bilgilerini ekle
+            if (locationEnabled) {
+                if (!currentLocation) {
+                    showMessage('⚠️ Konum kısıtlaması aktif iken önce mevcut konumunuzu almalısınız.', 'error');
+                    return;
+                }
+
+                formData.centerLatitude = currentLocation.latitude;
+                formData.centerLongitude = currentLocation.longitude;
+                formData.radiusMeters = parseInt(document.getElementById('radiusMeters').value);
+                formData.locationName = document.getElementById('locationName').value.trim() || 'Ders Konumu';
+            }
             
             // Validasyon
             if (!formData.name || formData.name.length < 2) {
@@ -426,10 +601,16 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    showMessage('✅ Ders başarıyla oluşturuldu! QR kod sayfasına yönlendiriliyorsunuz...', 'success');
+                    const locationMessage = data.locationEnabled ? ' (Konum kısıtlaması aktif)' : '';
+                    showMessage('✅ Ders başarıyla oluşturuldu!' + locationMessage + ' QR kod sayfasına yönlendiriliyorsunuz...', 'success');
                     
                     // Formu temizle
                     document.getElementById('lessonName').value = '';
+                    document.getElementById('locationName').value = '';
+                    document.getElementById('locationEnabled').checked = false;
+                    document.getElementById('locationSettings').style.display = 'none';
+                    document.getElementById('locationPreview').style.display = 'none';
+                    currentLocation = null;
                     
                     // QR kod sayfasına yönlendir
                     setTimeout(() => {

@@ -16,6 +16,25 @@
             <p>QR kod ile hızlı ve güvenli yoklama</p>
         </div>
         
+        <div id="locationWarning" class="info-card warning" style="display: none;">
+            <h3>📍 Konum Erişimi Gerekli</h3>
+            <p><strong>Yoklama yapabilmek için konum erişimine izin vermeniz gerekiyor.</strong></p>
+            <p>Lütfen tarayıcınızda kesin konum erişimine izin verin.</p>
+            
+            <div id="locationTips" style="display: none; margin-top: var(--space-3);">
+                <p><strong>Konum erişimi nasıl açılır:</strong></p>
+                <ul style="text-align: left; margin: var(--space-2) 0;">
+                    <li><strong>Chrome/Safari:</strong> Adres çubuğundaki 🔒 simgesine tıklayın → Konum → İzin Ver</li>
+                    <li><strong>Firefox:</strong> Adres çubuğundaki shield simgesine tıklayın → Konum → İzin Ver</li>
+                    <li><strong>Mobil:</strong> Tarayıcı ayarlarından site izinlerini kontrol edin</li>
+                </ul>
+            </div>
+            
+            <button id="requestLocationBtn" class="btn btn-lg" style="margin-top: var(--space-3);">
+                📍 Konum Erişimi İste
+            </button>
+        </div>
+
         <div id="lessonInfo" class="info-card">
             <h3>📚 Ders Bilgileri</h3>
             <p><strong>Ders Adı:</strong> <span id="lessonName">Yükleniyor...</span></p>
@@ -23,6 +42,15 @@
             <p><strong>Tarih:</strong> <span id="lessonDate">Yükleniyor...</span></p>
         </div>
         
+        <div id="gpsStatus" class="info-card" style="display: none;">
+            <h3>📡 GPS Durum</h3>
+            <p id="gpsStatusText">Konum alınıyor...</p>
+            <div id="gpsAccuracy" style="margin-top: var(--space-2);"></div>
+            <button id="retryLocationBtn" class="btn" style="display: none; margin-top: var(--space-2);">
+                🔄 Tekrar Dene
+            </button>
+        </div>
+
         <div id="attendanceForm" style="display: none;">
             <div class="info-card success">
                 <h3>👋 Hoş Geldiniz!</h3>
@@ -73,6 +101,12 @@
 
     <script>
         let lessonId = '';
+        let currentLocation = null;
+        let locationPermissionStatus = 'unknown';
+        let isLocationRequired = false;
+        let gpsRetryCount = 0;
+        let gpsRetryInterval = null;
+        const MAX_GPS_RETRIES = 5;
         
         window.onload = async function() {
             // URL'den lesson ID'yi al
@@ -89,7 +123,21 @@
             
             // Bu cihazdan daha önce yoklama yapılmış mı kontrol et
             checkPreviousAttendance();
+            
+            // Event listener'ları ayarla
+            setupEventListeners();
+            
+            // Eğer konum gerekiyorsa hemen izin iste
+            if (isLocationRequired) {
+                showLocationWarning();
+                requestLocationPermission();
+            }
         };
+        
+        function setupEventListeners() {
+            document.getElementById('requestLocationBtn').addEventListener('click', requestLocationPermission);
+            document.getElementById('retryLocationBtn').addEventListener('click', requestLocationPermission);
+        }
         
         async function loadLessonInfo() {
             try {
@@ -105,6 +153,9 @@
                         year: 'numeric'
                     });
                     document.getElementById('lessonDate').textContent = date;
+                    
+                    // Konum gerekli mi kontrol et
+                    isLocationRequired = data.lesson.location_enabled;
                 } else {
                     throw new Error(data.message);
                 }
@@ -123,19 +174,168 @@
                 // Daha önce yoklama yapılmış
                 document.getElementById('alreadySubmitted').style.display = 'block';
                 document.getElementById('attendanceForm').style.display = 'none';
+                document.getElementById('locationWarning').style.display = 'none';
+                document.getElementById('gpsStatus').style.display = 'none';
             } else {
-                // Henüz yoklama yapılmamış, formu göster
-                document.getElementById('attendanceForm').style.display = 'block';
-                document.getElementById('alreadySubmitted').style.display = 'none';
-                
-                // Input'a focus ver
-                setTimeout(() => {
-                    const input = document.getElementById('studentName');
-                    if (input) {
-                        input.focus();
-                    }
-                }, 500);
+                // Henüz yoklama yapılmamış
+                if (isLocationRequired) {
+                    // Konum gerekli - önce izin kontrolü yap
+                    showLocationWarning();
+                } else {
+                    // Konum gerekli değil - direkt formu göster
+                    showAttendanceForm();
+                }
             }
+        }
+        
+        function showLocationWarning() {
+            document.getElementById('locationWarning').style.display = 'block';
+            document.getElementById('attendanceForm').style.display = 'none';
+            document.getElementById('alreadySubmitted').style.display = 'none';
+        }
+        
+        function showAttendanceForm() {
+            document.getElementById('attendanceForm').style.display = 'block';
+            document.getElementById('locationWarning').style.display = 'none';
+            document.getElementById('alreadySubmitted').style.display = 'none';
+            document.getElementById('gpsStatus').style.display = 'none';
+            
+            // Input'a focus ver
+            setTimeout(() => {
+                const input = document.getElementById('studentName');
+                if (input) {
+                    input.focus();
+                }
+            }, 500);
+        }
+        
+        async function requestLocationPermission() {
+            if (!navigator.geolocation) {
+                showLocationError('Tarayıcınız konum servislerini desteklemiyor.');
+                return;
+            }
+            
+            document.getElementById('gpsStatus').style.display = 'block';
+            document.getElementById('gpsStatusText').textContent = 'Konum izni isteniyor...';
+            document.getElementById('retryLocationBtn').style.display = 'none';
+            
+            try {
+                await getCurrentLocationWithRetry();
+                // Başarılı - form göster
+                showAttendanceForm();
+                updateGPSStatus('ready');
+            } catch (error) {
+                console.error('Konum alma hatası:', error);
+                showLocationError(error.message);
+            }
+        }
+        
+        async function getCurrentLocationWithRetry() {
+            gpsRetryCount = 0;
+            
+            // Önce hızlı bir deneme yap
+            try {
+                const location = await getCurrentLocation(5000); // 5 saniye timeout
+                
+                if (location.accuracy <= 50) {
+                    // İyi doğruluk
+                    currentLocation = location;
+                    return location;
+                }
+                
+                // Doğruluk düşük - otomatik retry başlat
+                updateGPSStatus('improving', location.accuracy);
+                return await improveLocationAccuracy(location);
+                
+            } catch (error) {
+                if (error.code === error.PERMISSION_DENIED) {
+                    throw new Error('Konum erişimi reddedildi. Bu ders için konum bilgisi gerekli.');
+                }
+                
+                // Diğer hatalar için retry
+                updateGPSStatus('retrying');
+                return await improveLocationAccuracy();
+            }
+        }
+        
+        async function improveLocationAccuracy(initialLocation = null) {
+            let bestLocation = initialLocation;
+            
+            return new Promise((resolve, reject) => {
+                gpsRetryInterval = setInterval(async () => {
+                    gpsRetryCount++;
+                    
+                    try {
+                        const location = await getCurrentLocation(10000);
+                        
+                        if (!bestLocation || location.accuracy < bestLocation.accuracy) {
+                            bestLocation = location;
+                            updateGPSStatus('improving', location.accuracy);
+                        }
+                        
+                        // Yeterince iyi doğruluk veya max retry'a ulaştık
+                        if (bestLocation.accuracy <= 50 || gpsRetryCount >= MAX_GPS_RETRIES) {
+                            clearInterval(gpsRetryInterval);
+                            currentLocation = bestLocation;
+                            resolve(bestLocation);
+                        }
+                        
+                    } catch (error) {
+                        if (gpsRetryCount >= MAX_GPS_RETRIES) {
+                            clearInterval(gpsRetryInterval);
+                            
+                            if (bestLocation) {
+                                // En azından bir konum var
+                                currentLocation = bestLocation;
+                                updateGPSStatus('weak', bestLocation.accuracy);
+                                resolve(bestLocation);
+                            } else {
+                                reject(error);
+                            }
+                        }
+                    }
+                }, 3000); // Her 3 saniyede bir dene
+            });
+        }
+        
+        function updateGPSStatus(status, accuracy = null) {
+            const statusEl = document.getElementById('gpsStatusText');
+            const accuracyEl = document.getElementById('gpsAccuracy');
+            const retryBtn = document.getElementById('retryLocationBtn');
+            
+            switch (status) {
+                case 'improving':
+                    statusEl.textContent = 'GPS sinyali iyileştiriliyor...';
+                    accuracyEl.innerHTML = `<span style="color: var(--warning);">📍 Mevcut doğruluk: ±${Math.round(accuracy)}m</span>`;
+                    retryBtn.style.display = 'none';
+                    break;
+                    
+                case 'retrying':
+                    statusEl.textContent = 'Konum alınmaya çalışılıyor...';
+                    accuracyEl.innerHTML = '';
+                    retryBtn.style.display = 'none';
+                    break;
+                    
+                case 'weak':
+                    statusEl.textContent = 'GPS sinyali zayıf ancak kullanılabilir';
+                    accuracyEl.innerHTML = `<span style="color: var(--warning);">⚠️ Doğruluk: ±${Math.round(accuracy)}m (Daha iyi sinyal için açık alana çıkın)</span>`;
+                    retryBtn.style.display = 'inline-block';
+                    break;
+                    
+                case 'ready':
+                    statusEl.textContent = 'Konum hazır ✅';
+                    accuracyEl.innerHTML = currentLocation ? 
+                        `<span style="color: var(--success);">📍 Doğruluk: ±${Math.round(currentLocation.accuracy)}m</span>` : '';
+                    retryBtn.style.display = 'none';
+                    break;
+            }
+        }
+        
+        function showLocationError(message) {
+            document.getElementById('gpsStatusText').textContent = 'Konum alınamadı';
+            document.getElementById('gpsAccuracy').innerHTML = `<span style="color: var(--error);">❌ ${message}</span>`;
+            document.getElementById('retryLocationBtn').style.display = 'inline-block';
+            document.getElementById('locationTips').style.display = 'block';
         }
         
         // Form validasyonu
@@ -172,6 +372,55 @@
             }
         }
         
+        // GPS konum alma fonksiyonu
+        async function getCurrentLocation(timeout = 15000) {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject(new Error('Tarayıcınız konum servislerini desteklemiyor.'));
+                    return;
+                }
+
+                const options = {
+                    enableHighAccuracy: true,
+                    timeout: timeout,
+                    maximumAge: 0 // Her zaman fresh konum al
+                };
+
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        resolve({
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude,
+                            accuracy: position.coords.accuracy
+                        });
+                    },
+                    function(error) {
+                        let errorMessage = '';
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                errorMessage = 'Konum erişimi reddedildi. Bu ders için konum bilgisi gerekli.';
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                errorMessage = 'Konum bilgisi alınamadı. Lütfen GPS\'i açık olduğundan emin olun.';
+                                break;
+                            case error.TIMEOUT:
+                                errorMessage = 'Konum alma işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.';
+                                break;
+                            default:
+                                errorMessage = 'Konum alınırken bilinmeyen bir hata oluştu.';
+                                break;
+                        }
+                        
+                        // Error objesine code property'sini ekle
+                        const customError = new Error(errorMessage);
+                        customError.code = error.code;
+                        reject(customError);
+                    },
+                    options
+                );
+            });
+        }
+
         document.getElementById('studentForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -193,16 +442,51 @@
             
             loading.classList.add('show');
             
+            // Konum bilgisi kullan
+            let locationData = null;
+            if (isLocationRequired) {
+                if (!currentLocation) {
+                    loading.classList.remove('show');
+                    showError('📍 Konum bilgisi alınamadı. Lütfen konum erişimini yeniden deneyin.');
+                    showLocationWarning();
+                    return;
+                }
+                
+                locationData = currentLocation;
+                
+                // GPS doğruluğu kontrolü (sadece çok kötü sinyaller için uyarı)
+                if (locationData.accuracy > 200) {
+                    const continueAnyway = confirm(
+                        `GPS sinyali çok zayıf (±${Math.round(locationData.accuracy)}m hata payı). ` +
+                        `Daha iyi sinyal için açık alana çıkmanız önerilir.\n\n` +
+                        `Yine de devam etmek istiyor musunuz?`
+                    );
+                    if (!continueAnyway) {
+                        loading.classList.remove('show');
+                        return;
+                    }
+                }
+            }
+            
             try {
+                const requestBody = {
+                    lessonId: lessonId,
+                    studentName: studentName
+                };
+
+                // Konum bilgisi varsa ekle
+                if (locationData) {
+                    requestBody.latitude = locationData.latitude;
+                    requestBody.longitude = locationData.longitude;
+                    requestBody.accuracy = locationData.accuracy;
+                }
+
                 const response = await fetch('/takeAttendance', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        lessonId: lessonId,
-                        studentName: studentName
-                    })
+                    body: JSON.stringify(requestBody)
                 });
                 
                 const data = await response.json();
@@ -247,6 +531,44 @@
                         </div>
                     `;
                     document.getElementById('alreadySubmitted').style.display = 'block';
+                } else if (response && response.status === 403) {
+                    // Konum hatası - özel handling
+                    try {
+                        const errorData = await response.json();
+                        document.getElementById('attendanceForm').style.display = 'none';
+                        document.getElementById('alreadySubmitted').innerHTML = `
+                            <div class="info-card error">
+                                <h3>📍 Konum Hatası</h3>
+                                <p><strong>${errorData.message}</strong></p>
+                                ${errorData.distance ? `<p>Mevcut mesafeniz: <strong>${errorData.distance} metre</strong></p>` : ''}
+                                ${errorData.allowedRadius ? `<p>İzin verilen mesafe: <strong>${errorData.allowedRadius} metre</strong></p>` : ''}
+                                ${errorData.locationName ? `<p>Ders konumu: <strong>${errorData.locationName}</strong></p>` : ''}
+                            </div>
+                            
+                            <div class="empty-state">
+                                <div class="error-icon">📍</div>
+                                <h3>Konum Dışındasınız</h3>
+                                <p style="color: var(--gray-600);">
+                                    Bu ders için belirlenen alan içinde bulunmanız gerekiyor.
+                                </p>
+                            </div>
+
+                            <div class="info-card">
+                                <h3>💡 Öneri</h3>
+                                <p>• Ders konumuna yaklaşın</p>
+                                <p>• GPS sinyal gücünüzü kontrol edin</p>
+                                <p>• Açık alanda bulunduğunuzdan emin olun</p>
+                                <p>• Sayfayı yenileyip tekrar deneyin</p>
+                            </div>
+
+                            <button onclick="window.location.reload()" class="btn btn-lg btn-full" style="margin-top: var(--space-4);">
+                                🔄 Tekrar Dene
+                            </button>
+                        `;
+                        document.getElementById('alreadySubmitted').style.display = 'block';
+                    } catch (parseError) {
+                        showError('Konum kontrolü başarısız. Lütfen belirlenen alan içinde olduğunuzdan emin olun.');
+                    }
                 } else {
                     showError(error.message);
                     setFieldError('studentName', true);
