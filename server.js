@@ -46,6 +46,7 @@ function initDatabase() {
             name TEXT NOT NULL,
             date TEXT NOT NULL,
             validity_minutes INTEGER DEFAULT 30,
+            is_invalidated INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (teacher_id) REFERENCES teachers (id)
         )`);
@@ -59,6 +60,26 @@ function initDatabase() {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (lesson_id) REFERENCES lessons (id)
         )`);
+
+        // Add is_invalidated column to existing lessons table if it doesn't exist
+        db.run(`PRAGMA table_info(lessons)`, (err, rows) => {
+            if (!err) {
+                db.all(`PRAGMA table_info(lessons)`, (err, columns) => {
+                    if (!err) {
+                        const hasInvalidatedColumn = columns.some(col => col.name === 'is_invalidated');
+                        if (!hasInvalidatedColumn) {
+                            db.run(`ALTER TABLE lessons ADD COLUMN is_invalidated INTEGER DEFAULT 0`, (err) => {
+                                if (err) {
+                                    console.error('is_invalidated kolonu eklenirken hata:', err.message);
+                                } else {
+                                    console.log('is_invalidated kolonu başarıyla eklendi.');
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+        });
     });
     
     console.log('Veritabanı tabloları oluşturuldu.');
@@ -107,15 +128,6 @@ function hashPassword(password) {
 
 function validatePassword(password, hash) {
     return bcrypt.compareSync(password, hash);
-}
-
-// QR kod geçerlilik kontrolü
-function isQRCodeExpired(lessonCreatedAt, validityMinutes) {
-    const createdTime = new Date(lessonCreatedAt).getTime();
-    const currentTime = new Date().getTime();
-    const validityTimeMs = validityMinutes * 60 * 1000; // Dakikayı milisaniyeye çevir
-    
-    return (currentTime - createdTime) > validityTimeMs;
 }
 
 // Ana sayfa
@@ -253,7 +265,7 @@ app.post('/login', (req, res) => {
 
 // Ders oluşturma endpoint'i (Authentication required)
 app.post('/createLesson', authenticateToken, (req, res) => {
-    const { name, date, validityMinutes } = req.body;
+    const { name, date } = req.body;
     
     if (!name || !date) {
         return res.status(400).json({ 
@@ -262,19 +274,10 @@ app.post('/createLesson', authenticateToken, (req, res) => {
         });
     }
 
-    // Geçerlilik süresi kontrolü
-    const validity = validityMinutes || 30;
-    if (validity < 10 || validity > 60) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'QR kod geçerlilik süresi 10-60 dakika arasında olmalıdır.' 
-        });
-    }
-
     const lessonId = uuidv4();
     
     db.run('INSERT INTO lessons (id, teacher_id, name, date, validity_minutes) VALUES (?, ?, ?, ?, ?)', 
-        [lessonId, req.user.id, name, date, validity], 
+        [lessonId, req.user.id, name, date, 30], 
         function(err) {
             if (err) {
                 console.error('Ders oluşturma hatası:', err.message);
@@ -287,7 +290,6 @@ app.post('/createLesson', authenticateToken, (req, res) => {
             res.json({ 
                 success: true, 
                 lessonId: lessonId,
-                validityMinutes: validity,
                 message: 'Ders başarıyla oluşturuldu.'
             });
         }
@@ -368,6 +370,55 @@ app.delete('/deleteLesson/:lessonId', authenticateToken, (req, res) => {
     );
 });
 
+// QR kod geçersiz kılma endpoint'i (Authentication required)
+app.post('/invalidateQR/:lessonId', authenticateToken, (req, res) => {
+    const lessonId = req.params.lessonId;
+    
+    // Önce dersin bu öğretmene ait olup olmadığını kontrol et
+    db.get('SELECT * FROM lessons WHERE id = ? AND teacher_id = ?', 
+        [lessonId, req.user.id], 
+        (err, row) => {
+            if (err) {
+                console.error('Ders kontrol hatası:', err.message);
+                return res.status(500).json({ 
+                    success: false, 
+                    message: 'Ders kontrolü yapılamadı.' 
+                });
+            }
+            
+            if (!row) {
+                return res.status(404).json({ 
+                    success: false, 
+                    message: 'Ders bulunamadı veya yetkiniz yok.' 
+                });
+            }
+            
+            if (row.is_invalidated) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Bu QR kod zaten geçersiz kılınmış.' 
+                });
+            }
+            
+            // QR kodu geçersiz kıl
+            db.run('UPDATE lessons SET is_invalidated = 1 WHERE id = ?', [lessonId], (err) => {
+                if (err) {
+                    console.error('QR kod geçersiz kılma hatası:', err.message);
+                    return res.status(500).json({ 
+                        success: false, 
+                        message: 'QR kod geçersiz kılınamadı.' 
+                    });
+                }
+                
+                res.json({ 
+                    success: true, 
+                    message: 'QR kod başarıyla geçersiz kılındı.' 
+                });
+            });
+        }
+    );
+});
+
 // Ders bilgisi alma endpoint'i (Public - QR kodu için)
 app.get('/lesson/:lessonId', (req, res) => {
     const lessonId = req.params.lessonId;
@@ -427,13 +478,11 @@ app.post('/takeAttendance', (req, res) => {
             });
         }
 
-        // QR kod geçerlilik süresini kontrol et
-        const validityMinutes = lesson.validity_minutes || 30;
-        if (isQRCodeExpired(lesson.created_at, validityMinutes)) {
+        // QR kodun geçersiz kılınıp kılınmadığını kontrol et
+        if (lesson.is_invalidated) {
             return res.status(410).json({ 
                 success: false, 
-                message: `QR kodun geçerlilik süresi dolmuş. Öğretmeninizden yeni QR kod talep edin.`,
-                expired: true
+                message: 'Bu QR kod geçersiz kılınmıştır. Artık yoklama yapılamaz.' 
             });
         }
 
@@ -525,7 +574,8 @@ app.get('/attendanceList/:lessonId', authenticateToken, (req, res) => {
                     lesson: {
                         id: lesson.id,
                         name: lesson.name,
-                        date: lesson.date
+                        date: lesson.date,
+                        is_invalidated: lesson.is_invalidated
                     },
                     attendances: rows,
                     total: rows.length
@@ -545,6 +595,7 @@ const server = app.listen(PORT, () => {
     console.log(`📖 Derslerim: GET /myLessons`);
     console.log(`🎯 Yoklama al: POST /takeAttendance`);
     console.log(`📊 Yoklama listesi: GET /attendanceList/:lessonId`);
+    console.log(`❌ QR kod geçersiz kıl: POST /invalidateQR/:lessonId`);
     console.log(`🗑️ Ders sil: DELETE /deleteLesson/:lessonId`);
 });
 

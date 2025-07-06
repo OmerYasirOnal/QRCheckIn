@@ -42,7 +42,7 @@
             
             <div class="info-card">
                 <h3>💡 Bilgi</h3>
-                <p>Yeni bir ders oluşturduğunuzda, öğrencilerinizin yoklama yapması için QR kod üretilir. QR kodun geçerlilik süresini aşağıdan ayarlayabilirsiniz.</p>
+                <p>Yeni bir ders oluşturduğunuzda, öğrencilerinizin yoklama yapması için QR kod üretilir.</p>
             </div>
             
             <form id="lessonForm">
@@ -52,35 +52,12 @@
                            placeholder="Örn: Matematik 101, Fizik Dersi, İngilizce" autocomplete="off">
                 </div>
                 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="lessonDate">Ders Tarihi</label>
-                        <input type="date" id="lessonDate" name="lessonDate" required readonly>
-                        <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
-                            Ders tarihi otomatik olarak bugünün tarihi olarak ayarlanır.
-                        </small>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="qrValidity">QR Kod Geçerlilik Süresi</label>
-                        <select id="qrValidity" name="qrValidity" required>
-                            <option value="10">10 Dakika</option>
-                            <option value="15">15 Dakika</option>
-                            <option value="20">20 Dakika</option>
-                            <option value="30" selected>30 Dakika</option>
-                            <option value="45">45 Dakika</option>
-                            <option value="60">60 Dakika</option>
-                        </select>
-                        <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
-                            Bu süre sonunda QR kod geçersiz hale gelecektir.
-                        </small>
-                    </div>
-                </div>
-                
-                <div class="info-card warning">
-                    <h3>⚠️ Önemli</h3>
-                    <p><strong>QR Kod Geçerlilik:</strong> Belirlediğiniz süre sonunda QR kod otomatik olarak geçersiz hale gelir. Öğrenciler süresi dolmuş QR kodlarla yoklama yapamazlar.</p>
-                    <p><strong>Yeni QR Kod:</strong> Gerekirse aynı ders için yeni bir QR kod oluşturabilirsiniz.</p>
+                <div class="form-group">
+                    <label for="lessonDate">Ders Tarihi</label>
+                    <input type="date" id="lessonDate" name="lessonDate" required readonly>
+                    <small class="error-text" style="color: var(--gray-500); margin-top: var(--space-1); display: block;">
+                        Ders tarihi otomatik olarak bugünün tarihi olarak ayarlanır.
+                    </small>
                 </div>
                 
                 <button type="submit" class="btn btn-lg btn-full">🎯 Ders Oluştur ve QR Kod Üret</button>
@@ -221,7 +198,10 @@
             
             if (response.status === 401 || response.status === 403) {
                 // Token geçersiz, giriş sayfasına yönlendir
-                logout();
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                alert('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+                window.location.href = 'index.html';
                 return null;
             }
             
@@ -230,6 +210,8 @@
         
         // Dersleri yükle
         async function loadLessons() {
+            const container = document.getElementById('lessonsContainer');
+            
             try {
                 const response = await makeAuthenticatedRequest('/myLessons');
                 if (!response) return;
@@ -238,58 +220,47 @@
                 
                 if (data.success) {
                     lessons = data.lessons;
-                    renderLessons();
+                    
+                    if (lessons.length === 0) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <h3>📚 Henüz ders oluşturmadınız</h3>
+                                <p>İlk dersinizi oluşturmak için "Yeni Ders" sekmesini kullanın.</p>
+                            </div>
+                        `;
+                    } else {
+                        const lessonsHtml = lessons.map(lesson => `
+                            <div class="lesson-card">
+                                <div class="lesson-header">
+                                    <h3>${lesson.name}${lesson.is_invalidated ? ' <span style="color: var(--error-color); font-size: 0.9em;">(QR Geçersiz)</span>' : ''}</h3>
+                                    <div class="lesson-actions">
+                                        <button class="btn btn-sm" onclick="showQRCode('${lesson.id}')">🔗 QR Kod</button>
+                                        <button class="btn btn-sm btn-outline" onclick="showAttendanceList('${lesson.id}')">👥 Yoklama</button>
+                                        <button class="btn btn-sm btn-danger" onclick="deleteLesson('${lesson.id}', '${lesson.name}')">🗑️ Sil</button>
+                                    </div>
+                                </div>
+                                <div class="lesson-info">
+                                    <p><strong>Tarih:</strong> ${formatDate(lesson.date)}</p>
+                                    <p><strong>Oluşturulma:</strong> ${formatDateTime(lesson.created_at)}</p>
+                                    <p><strong>ID:</strong> ${lesson.id}</p>
+                                    ${lesson.is_invalidated ? '<p><strong>Durum:</strong> <span style="color: var(--error-color);">❌ QR Kod Geçersiz Kılındı</span></p>' : '<p><strong>Durum:</strong> <span style="color: var(--success-color);">✅ Aktif</span></p>'}
+                                </div>
+                            </div>
+                        `).join('');
+                        
+                        container.innerHTML = lessonsHtml;
+                    }
                 } else {
-                    showMessage(data.message, 'error');
+                    throw new Error(data.message);
                 }
             } catch (error) {
-                showMessage('⚠️ Dersler yüklenirken hata oluştu: ' + error.message, 'error');
-            }
-        }
-        
-        // Dersleri render et
-        function renderLessons() {
-            const container = document.getElementById('lessonsContainer');
-            
-            if (lessons.length === 0) {
+                console.error('Dersler yüklenirken hata:', error);
                 container.innerHTML = `
-                    <div class="empty-state">
-                        <h3>📚 Henüz ders oluşturmadınız</h3>
-                        <p>Yeni ders oluşturmak için "Yeni Ders" sekmesini kullanın.</p>
+                    <div class="message error">
+                        <strong>Hata!</strong> Dersler yüklenemedi: ${error.message}
                     </div>
                 `;
-                return;
             }
-            
-            const lessonsHtml = lessons.map(lesson => `
-                <div class="lesson-card">
-                    <div class="lesson-header">
-                        <div class="lesson-title">
-                            <h3>${lesson.name}</h3>
-                        </div>
-                        <span class="lesson-date">${formatDate(lesson.date)}</span>
-                    </div>
-                    <div class="lesson-actions">
-                        <button class="btn btn-sm" onclick="showQRCode('${lesson.id}', ${lesson.validity_minutes || 30})">
-                            🔗 QR Kod
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="showAttendanceList('${lesson.id}')">
-                            📊 Yoklama Listesi
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteLesson('${lesson.id}', '${lesson.name}')">
-                            🗑️ Sil
-                        </button>
-                    </div>
-                    <div class="lesson-meta">
-                        <small>
-                            Oluşturulma: ${formatDateTime(lesson.created_at)}
-                            ${lesson.validity_minutes ? ` • QR Geçerlilik: ${lesson.validity_minutes} dk` : ''}
-                        </small>
-                    </div>
-                </div>
-            `).join('');
-            
-            container.innerHTML = lessonsHtml;
         }
         
         // Tarih formatlama
@@ -315,8 +286,8 @@
         }
         
         // QR kod gösterme
-        function showQRCode(lessonId, validityMinutes = 30) {
-            window.location.href = `qr.html?lessonId=${lessonId}&validity=${validityMinutes}`;
+        function showQRCode(lessonId) {
+            window.location.href = `qr.html?lessonId=${lessonId}`;
         }
         
         // Yoklama listesi gösterme
@@ -353,11 +324,12 @@
                         `;
                     } else {
                         const attendanceHtml = `
-                            <div class="info-card success">
+                            <div class="info-card ${data.lesson.is_invalidated ? 'warning' : 'success'}">
                                 <h3>📈 Yoklama Özeti</h3>
                                 <p><strong>Toplam Katılan:</strong> ${data.total} öğrenci</p>
                                 <p><strong>Ders:</strong> ${data.lesson.name}</p>
                                 <p><strong>Tarih:</strong> ${formatDate(data.lesson.date)}</p>
+                                <p><strong>QR Durum:</strong> ${data.lesson.is_invalidated ? '<span style="color: var(--error-color);">❌ Geçersiz Kılındı</span>' : '<span style="color: var(--success-color);">✅ Aktif</span>'}</p>
                             </div>
                             
                             <h3>👥 Katılan Öğrenciler</h3>
@@ -427,8 +399,7 @@
             
             const formData = {
                 name: document.getElementById('lessonName').value.trim(),
-                date: document.getElementById('lessonDate').value,
-                validityMinutes: parseInt(document.getElementById('qrValidity').value)
+                date: document.getElementById('lessonDate').value
             };
             
             // Validasyon
@@ -462,7 +433,7 @@
                     
                     // QR kod sayfasına yönlendir
                     setTimeout(() => {
-                        window.location.href = `qr.html?lessonId=${data.lessonId}&validity=${formData.validityMinutes}`;
+                        window.location.href = `qr.html?lessonId=${data.lessonId}`;
                     }, 1500);
                 } else {
                     throw new Error(data.message);

@@ -34,13 +34,6 @@
             </div>
         </div>
         
-        <!-- QR Kod Geçerlilik Durumu -->
-        <div id="qrValidityStatus" class="qr-validity">
-            <h3>⏰ QR Kod Geçerlilik Durumu</h3>
-            <div class="qr-validity-timer" id="remainingTime">Hesaplanıyor...</div>
-            <p>QR kod bu süre boyunca geçerli olacaktır.</p>
-        </div>
-        
         <div class="qr-container">
             <h2>📲 Öğrenciler Bu QR Kodu Okutun</h2>
             <div id="qrcode"></div>
@@ -65,10 +58,6 @@
                 <div class="stat-label">Katılan Öğrenci</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number" id="validityMinutes">-</div>
-                <div class="stat-label">Geçerlilik (dakika)</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-number" id="lastUpdate">-</div>
                 <div class="stat-label">Son Güncelleme</div>
             </div>
@@ -80,6 +69,7 @@
                 <div style="display: flex; gap: var(--space-2);">
                     <button class="btn btn-sm btn-outline" onclick="refreshAttendance()">🔄 Yenile</button>
                     <button class="btn btn-sm" onclick="generateNewQR()">🔄 Yeni QR Kod</button>
+                    <button class="btn btn-sm btn-danger" onclick="invalidateQR()" id="invalidateBtn">❌ QR Geçersiz Kıl</button>
                 </div>
             </div>
             <div id="attendanceList" class="attendance-list">
@@ -95,12 +85,10 @@
 
     <script>
         let lessonId = '';
-        let validityMinutes = 30;
         let refreshInterval;
-        let timerInterval;
         let currentUser = null;
         let currentToken = null;
-        let lessonCreatedAt = null;
+        let isLessonInvalidated = false;
         
         window.onload = async function() {
             // Token ve kullanıcı bilgilerini kontrol et
@@ -135,10 +123,9 @@
                 return;
             }
             
-            // URL'den lesson ID ve geçerlilik bilgilerini al
+            // URL'den lesson ID'yi al
             const urlParams = new URLSearchParams(window.location.search);
             lessonId = urlParams.get('lessonId');
-            validityMinutes = parseInt(urlParams.get('validity')) || 30;
             
             if (!lessonId) {
                 alert('Ders ID bulunamadı!');
@@ -147,16 +134,12 @@
             }
             
             document.getElementById('lessonId').textContent = lessonId;
-            document.getElementById('validityMinutes').textContent = validityMinutes;
             
             // Ders bilgilerini al
             await loadLessonInfo();
             
             // QR kod oluştur
             generateQRCode();
-            
-            // Timer'ı başlat
-            startValidityTimer();
             
             // İlk yoklama listesini yükle
             await loadAttendanceList();
@@ -165,65 +148,10 @@
             refreshInterval = setInterval(loadAttendanceList, 5000);
         };
         
-        // Sayfa kapatıldığında interval'ları temizle
+        // Sayfa kapatıldığında interval'ı temizle
         window.onbeforeunload = function() {
             if (refreshInterval) clearInterval(refreshInterval);
-            if (timerInterval) clearInterval(timerInterval);
         };
-        
-        // Geçerlilik timer'ı başlat
-        function startValidityTimer() {
-            if (!lessonCreatedAt) return;
-            
-            timerInterval = setInterval(() => {
-                updateValidityDisplay();
-            }, 1000);
-            
-            updateValidityDisplay();
-        }
-        
-        // Geçerlilik durumunu güncelle
-        function updateValidityDisplay() {
-            if (!lessonCreatedAt) return;
-            
-            const createdTime = new Date(lessonCreatedAt).getTime();
-            const currentTime = new Date().getTime();
-            const validityTimeMs = validityMinutes * 60 * 1000;
-            const elapsedMs = currentTime - createdTime;
-            const remainingMs = validityTimeMs - elapsedMs;
-            
-            const statusDiv = document.getElementById('qrValidityStatus');
-            const timerDiv = document.getElementById('remainingTime');
-            
-            if (remainingMs <= 0) {
-                // Süre dolmuş
-                statusDiv.classList.add('expired');
-                timerDiv.textContent = 'SÜRESİ DOLMUŞ';
-                document.getElementById('qrMessage').innerHTML = `
-                    <div class="message error" style="margin-top: var(--space-4);">
-                        <strong>⚠️ QR Kod Süresi Doldu!</strong><br>
-                        Öğrenciler artık bu QR kod ile yoklama yapamaz. Yeni QR kod oluşturun.
-                    </div>
-                `;
-                
-                if (timerInterval) {
-                    clearInterval(timerInterval);
-                    timerInterval = null;
-                }
-            } else {
-                // Hala geçerli
-                const remainingMinutes = Math.floor(remainingMs / 60000);
-                const remainingSeconds = Math.floor((remainingMs % 60000) / 1000);
-                
-                timerDiv.textContent = `${remainingMinutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-                
-                // Son 5 dakikada uyarı rengi
-                if (remainingMinutes < 5) {
-                    statusDiv.style.borderColor = 'var(--warning-color)';
-                    statusDiv.querySelector('h3').style.color = 'var(--warning-color)';
-                }
-            }
-        }
         
         // API isteği yapma fonksiyonu
         async function makeAuthenticatedRequest(url, options = {}) {
@@ -272,8 +200,9 @@
                     });
                     document.getElementById('lessonDate').textContent = date;
                     
-                    // Ders oluşturulma zamanını kaydet
-                    lessonCreatedAt = data.lesson.created_at;
+                    // Invalidation status kontrol et
+                    isLessonInvalidated = data.lesson.is_invalidated;
+                    updateUIForInvalidation();
                 } else {
                     throw new Error(data.message);
                 }
@@ -284,7 +213,7 @@
         }
         
         function generateQRCode() {
-            const qrData = `${window.location.origin}/student.html?lessonId=${lessonId}&validity=${validityMinutes}`;
+            const qrData = `${window.location.origin}/student.html?lessonId=${lessonId}`;
             
             try {
                 // QR kod container'ını temizle
@@ -363,9 +292,81 @@
             }
         }
         
+        // QR kodu geçersiz kıl
+        async function invalidateQR() {
+            if (!confirm('QR kodu geçersiz kılmak istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve öğrenciler artık bu QR kodla yoklama yapamayacaklar.')) {
+                return;
+            }
+            
+            try {
+                showMessage('⏳ QR kod geçersiz kılınıyor...', 'info');
+                
+                const response = await makeAuthenticatedRequest(`/invalidateQR/${lessonId}`, {
+                    method: 'POST'
+                });
+                
+                if (!response) return;
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    isLessonInvalidated = true;
+                    updateUIForInvalidation();
+                    showMessage('✅ QR kod başarıyla geçersiz kılındı.', 'success');
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                showMessage('⚠️ QR kod geçersiz kılınırken hata oluştu: ' + error.message, 'error');
+            }
+        }
+
+        // UI'ı invalidation durumuna göre güncelle
+        function updateUIForInvalidation() {
+            const qrContainer = document.getElementById('qrcode');
+            const qrMessage = document.getElementById('qrMessage');
+            const invalidateBtn = document.getElementById('invalidateBtn');
+            
+            if (isLessonInvalidated) {
+                // QR kod alanını gizle ve geçersiz mesajı göster
+                qrContainer.innerHTML = `
+                    <div class="message error" style="text-align: center; padding: var(--space-8);">
+                        <h3>❌ QR Kod Geçersiz Kılındı</h3>
+                        <p>Bu QR kod öğretmen tarafından geçersiz kılınmıştır.<br>
+                        Öğrenciler artık bu QR kodla yoklama yapamaz.</p>
+                    </div>
+                `;
+                
+                qrMessage.innerHTML = `
+                    <div class="info-card warning" style="margin-top: var(--space-4);">
+                        <h3>⚠️ Dikkat</h3>
+                        <p><strong>Bu QR kod geçersiz kılınmıştır.</strong></p>
+                        <p>Mevcut yoklama listesi korunur ancak yeni öğrenciler yoklama yapamaz.</p>
+                        <p>Yeni yoklama için yeni bir ders oluşturmanız gerekir.</p>
+                    </div>
+                `;
+                
+                // Invalidate butonunu gizle
+                if (invalidateBtn) {
+                    invalidateBtn.style.display = 'none';
+                }
+                
+                // Interval'ı durdur (artık yenilemeye gerek yok)
+                if (refreshInterval) {
+                    clearInterval(refreshInterval);
+                    refreshInterval = null;
+                }
+            } else {
+                // Normal durumda invalidate butonunu göster
+                if (invalidateBtn) {
+                    invalidateBtn.style.display = 'inline-block';
+                }
+            }
+        }
+
         // Yeni QR kod oluştur
         async function generateNewQR() {
-            if (!confirm('Yeni QR kod oluşturmak istediğinizden emin misiniz?\n\nBu işlem mevcut QR kodu geçersiz kılacak ve yeni bir geçerlilik süresi başlatacaktır.')) {
+            if (!confirm('Yeni QR kod oluşturmak istediğinizden emin misiniz?\n\nBu işlem mevcut QR kodu geçersiz kılacaktır.')) {
                 return;
             }
             
@@ -373,8 +374,6 @@
                 showMessage('🔄 Yeni QR kod oluşturuluyor...', 'info');
                 
                 // Sayfayı yeniden yükleyerek yeni QR kod oluştur
-                // Aslında backend'de yeni bir lesson create etmek gerekebilir, 
-                // şimdilik basitçe sayfayı yenileyelim
                 window.location.reload();
                 
             } catch (error) {
@@ -395,9 +394,8 @@
         }
         
         function goBack() {
-            // Interval'ları temizle
+            // Interval'ı temizle
             if (refreshInterval) clearInterval(refreshInterval);
-            if (timerInterval) clearInterval(timerInterval);
             
             window.location.href = 'teacher.html';
         }

@@ -1,0 +1,7 @@
+---
+description: |
+  Whenever any changes are made to the project’s codebase (adding, removing, or modifying features, endpoints, database schema, or logic), always update the related sections in the project documentation immediately to keep it clear and up-to-date.
+globs:
+  - "**/*"
+alwaysApply: true
+---
