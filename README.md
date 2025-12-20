@@ -302,3 +302,8 @@ Sorularınız için issue açabilir veya pull request gönderebilirsiniz.
 ---
 
 **Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır. 
+
+## Update 2025-12-20T18:50:24.527Z
+Documentation updated by ScribeAgent.
+
+Plan Rationale: Mock plan for scribe agent to achieve: Update documentation in README.md
