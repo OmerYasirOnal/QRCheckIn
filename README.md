@@ -1,3 +1,27 @@
+Mock generated content for task: You are a technical documentation specialist. Generate high-quality readme documentation.
+
+**Task**: Update README.md with comprehensive documentation
+
+**Documentation Contract (readme)**:
+Required sections:
+- Title and Description: Project name and one-line summary
+- Installation: How to install/setup the project
+- Usage: Basic usage examples
+
+Optional sections (include if relevant):
+- Features: Key features and capabilities
+- Configuration: Configuration options and environment variables
+- Contributing: How to contribute to the project
+- License: License information
+
+**Quality Requirements**:
+- Tone: friendly
+- Minimum length: 500 characters
+- Must include code examples
+
+
+**Existing Content** (if any):
+```
 # 📱 QR Kod ile Yoklama Alma Sistemi
 
 Bu proje, QR kod teknolojisi kullanarak öğrencilerin derse yoklama yapmasını sağlayan web tabanlı bir uygulamadır.
@@ -302,3 +326,15 @@ Sorularınız için issue açabilir veya pull request gönderebilirsiniz.
 ---
 
 **Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır. 
+```
+
+**Instructions**:
+1. Analyze the existing content structure
+2. Generate or update content following the contract
+3. Ensure all required sections are present
+4. Use appropriate Markdown formatting
+5. Include practical examples where applicable
+6. Maintain consistency with existing style if content exists
+7. Output ONLY the complete updated Markdown content (no explanations, no meta-commentary)
+
+**Output**:
