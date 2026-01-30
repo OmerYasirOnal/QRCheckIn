@@ -1,3 +1,4 @@
+```markdown
 # 📱 QR Kod ile Yoklama Alma Sistemi
 
 Bu proje, QR kod teknolojisi kullanarak öğrencilerin derse yoklama yapmasını sağlayan web tabanlı bir uygulamadır.
@@ -180,7 +181,7 @@ npm start
 # 1. Tarayıcı cache'ini temizleyin (Ctrl+Shift+R veya Cmd+Shift+R)
 # 2. Browser konsolu açın (F12) ve hata mesajlarını kontrol edin
 # 3. QRCode kütüphanesinin yüklendiğini kontrol edin:
-console.log(typeof QRCode); // 'function' dönemeli
+console.log(typeof QRCode); // 'function' dönmeli
 
 # 4. İnternet bağlantınızı kontrol edin (CDN için gerekli)
 ```
@@ -301,4 +302,5 @@ Sorularınız için issue açabilir veya pull request gönderebilirsiniz.
 
 ---
 
-**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır. 
+**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır.
+```
