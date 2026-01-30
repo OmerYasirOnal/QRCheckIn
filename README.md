@@ -1,3 +1,4 @@
+```markdown
 # 📱 QR Kod ile Yoklama Alma Sistemi
 
 Bu proje, QR kod teknolojisi kullanarak öğrencilerin derse yoklama yapmasını sağlayan web tabanlı bir uygulamadır.
@@ -301,4 +302,5 @@ Sorularınız için issue açabilir veya pull request gönderebilirsiniz.
 
 ---
 
-**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır. 
+**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır.
+```
