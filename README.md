@@ -1,3 +1,4 @@
+```markdown
 # 📱 QR Kod ile Yoklama Alma Sistemi
 
 Bu proje, QR kod teknolojisi kullanarak öğrencilerin derse yoklama yapmasını sağlayan web tabanlı bir uygulamadır.
@@ -173,116 +174,6 @@ npm start
 - Mobil QR kod okuyucu uyumlu
 - Hızlı yükleme için optimize edilmiş
 
-## 🔧 Sorun Giderme
-
-### QR Kod Görünmüyor
-```bash
-# 1. Tarayıcı cache'ini temizleyin (Ctrl+Shift+R veya Cmd+Shift+R)
-# 2. Browser konsolu açın (F12) ve hata mesajlarını kontrol edin
-# 3. QRCode kütüphanesinin yüklendiğini kontrol edin:
-console.log(typeof QRCode); // 'function' dönemeli
-
-# 4. İnternet bağlantınızı kontrol edin (CDN için gerekli)
-```
-
-### Sunucu Başlatma Sorunları
-```bash
-# Port zaten kullanımda hatası
-lsof -ti:3000 | xargs kill -9  # Port 3000'i temizle
-npm start
-
-# Veritabanı hatası
-rm database.sqlite  # Veritabanını sıfırla
-npm start
-```
-
-### Yoklama Çalışmıyor
-- IP adresi değişti mi kontrol edin
-- localStorage'ı temizleyin: F12 > Application > Local Storage > Clear
-- Farklı tarayıcı veya gizli mod deneyin
-
-## ⚠️ Önemli Notlar
-
-- Bu uygulama demo amaçlı basit kimlik doğrulama kullanır
-- Üretim ortamında daha güvenli authentication sistemi kullanın
-- HTTPS kullanımı önerilir
-- Veritabanı yedeklemesini unutmayın
-
-## 🚀 Canlı Ortam Deployment
-
-### 1. Yerel Proje Konumu ve Hazırlık
-```bash
-# Yerel proje yolu
-/Users/omeryasironal/CheckingWebAPP
-
-# Ana dizine gidip node_modules hariç zipleme
-cd /Users/omeryasironal/CheckingWebAPP
-zip -r deploy.zip . -x "node_modules/*"
-
-# Sunucuya gönderme
-scp -i ~/.ssh/id_ed25519 deploy.zip ubuntu@141.147.25.123:~/qr-attendance-app/
-```
-
-### 2. Sunucuya Bağlanma ve Kurulum
-```bash
-# SSH ile sunucuya bağlanma
-ssh -i ~/.ssh/id_ed25519 ubuntu@141.147.25.123
-
-# Proje klasörüne gitme
-cd ~/qr-attendance-app
-
-# Önceki dosyaları temizleme (isteğe bağlı)
-rm -rf *
-
-# Zip dosyasını açma
-unzip deploy.zip
-
-# Zip dosyasını silme
-rm deploy.zip
-
-# Paketleri yükleme
-npm install
-
-# PM2 ile uygulamayı başlatma
-pm2 start server.js --name qr-attendance
-
-# PM2 durumunu kontrol etme
-pm2 status
-
-# PM2 otomatik başlatma ayarı
-pm2 save
-```
-
-### 3. Otomatik Deploy Script
-Sunucu tarafında `deploy.sh` dosyası oluşturun:
-
-```bash
-#!/bin/bash
-
-echo "🔄 Deploy başlıyor..."
-
-cd ~/qr-attendance-app
-
-npm install
-
-pm2 restart qr-attendance || pm2 start server.js --name qr-attendance
-
-pm2 save
-
-echo "✅ Deploy bitti!"
-```
-
-Script'i çalıştırılabilir hale getirme ve kullanma:
-```bash
-chmod +x deploy.sh
-./deploy.sh
-```
-
-### 4. Deployment Özeti
-- Local: zip ile node_modules dahil edilmez → scp ile gönderilir.
-- Sunucu: npm install ile bağımlılıklar kurulur → SQLite veritabanı sunucuda saklanır.
-- PM2: Uygulamayı arkaplanda çalıştırır ve sunucu yeniden başlatıldığında otomatik başlatır.
-
 ## 🤝 Katkıda Bulunma
 
 1. Bu repository'yi fork edin
@@ -301,4 +192,5 @@ Sorularınız için issue açabilir veya pull request gönderebilirsiniz.
 
 ---
 
-**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır. 
+**Geliştirici Notu**: Bu sistem eğitim amaçlı geliştirilmiştir. Üretim ortamında kullanım için ek güvenlik önlemleri alınmalıdır.
+```
